@@ -370,7 +370,8 @@ export default {
       // 鼠标移入事件
       mouseOn: false,
       // 是否移动 （如果没有移动 不需要记录snapshot）
-      hasMove: false
+      hasMove: false,
+      mouseEvent: null
     }
   },
   computed: {
@@ -543,7 +544,8 @@ export default {
       'canvasStyleData',
       'linkageSettingStatus',
       'mobileLayoutStatus',
-      'componentGap'
+      'componentGap',
+      'scrollAutoMove'
     ])
   },
   watch: {
@@ -646,12 +648,24 @@ export default {
     dragging(val) {
       if (this.enabled) {
         this.curComponent.optStatus.dragging = val
+        this.$store.commit('setScrollAutoMove', 0)
+        // console.log('scrollAutoMove-cancel：' + this.scrollAutoMove)
       }
     },
     // private 监控dragging  resizing
     resizing(val) {
       if (this.enabled) {
         this.curComponent.optStatus.resizing = val
+        this.$store.commit('setScrollAutoMove', 0)
+        // console.log('scrollAutoMove-cancel：' + this.scrollAutoMove)
+
+      }
+    },
+    // 监控是否出现自动滑动
+    scrollAutoMove(value) {
+      // console.log('scrollAutoMove:' + value)
+      if (value > 0 && this.mouseEvent) {
+        this.handleDrag(this.mouseEvent)
       }
     }
   },
@@ -953,6 +967,7 @@ export default {
     },
     // 移动
     move(e) {
+      this.mouseEvent = e
       if (this.resizing) {
         this.handleResize(e)
       } else if (this.dragging) {
@@ -1007,7 +1022,7 @@ export default {
       const right = restrictToBounds(mouseClickPosition.right + deltaX, bounds.minRight, bounds.maxRight)
       const bottom = restrictToBounds(mouseClickPosition.bottom + deltaY, bounds.minBottom, bounds.maxBottom)
       this.left = left
-      this.top = top
+      this.top = top + this.scrollAutoMove
       this.right = right
       this.bottom = bottom
       await this.snapCheck()

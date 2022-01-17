@@ -115,19 +115,22 @@
               @dragover="handleDragOver"
               @mousedown="handleMouseDown"
               @mouseup="deselectCurComponent"
-              @scroll="canvasScroll"
             >
-              <el-row class="this_mobile_canvas_top" />
+              <el-row class="this_mobile_canvas_top" style="color: #FFFFFF">
+                <el-button @click.native="scrollMove">开始</el-button>
+                <el-button @click.native="destroyTimer">结束</el-button>
+              </el-row>
               <el-row class="this_mobile_canvas_inner_top">
                 {{ panelInfo.name }}
               </el-row>
-              <el-row
+              <div
                 id="canvasInfoMobile"
                 class="this_mobile_canvas_main"
                 :style="mobileCanvasStyle"
+                @scroll="canvasScroll"
               >
-                <Editor v-if="mobileEditorShow" ref="editorMobile" :matrix-count="mobileMatrixCount" :out-style="outStyle" :scroll-top="scrollTop" />
-              </el-row>
+                <Editor v-if="mobileEditorShow" id="editorMobile" ref="editorMobile" :matrix-count="mobileMatrixCount" :out-style="outStyle" :scroll-top="scrollTop" />
+              </div>
               <el-row class="this_mobile_canvas_inner_bottom">
                 <el-col :span="12">
                   <i v-if="!hasStar" class="el-icon-star-off" size="mini" @click="star" />
@@ -314,7 +317,8 @@ export default {
         'de-video'
       ],
       enableSureButton: false,
-      filterFromDrag: false
+      filterFromDrag: false,
+      autoMoveOffSet: 5
     }
   },
 
@@ -384,6 +388,28 @@ export default {
     panelInfo() {
       return this.$store.state.panel.panelInfo
     },
+    // 计算是否接触上下边界
+    attackBoundary() {
+      let result = 'none'
+      if (this.curComponent && this.curComponent.optStatus.dragging) {
+        const curTop = this.curComponent.style.top * this.curCanvasScale.scalePointHeight
+        // 当前组件底部高度
+        const curBottom = (curTop + this.curComponent.style.height * this.curCanvasScale.scalePointHeight)
+        const screenBottom = this.scrollTop + this.outStyle.height
+
+        if ((curBottom) > screenBottom) {
+          // 触底
+          result = 'toBottom'
+        } else if (curTop + this.autoMoveOffSet < this.scrollTop) {
+          // 触顶
+          result = 'toTop'
+        } else {
+          result = 'none'
+        }
+        console.log('result:' + result + ';curTop:' + curTop + ';curBottom:' + curBottom + ';screenBottom:' + screenBottom + ';scrollTop:' + this.scrollTop + ';this.outStyle.height:' + this.outStyle.height)
+      }
+      return result
+    },
     ...mapState([
       'curComponent',
       'curCanvasScale',
@@ -397,7 +423,8 @@ export default {
       'mobileLayoutStatus',
       'pcMatrixCount',
       'mobileMatrixCount',
-      'mobileLayoutStyle'
+      'mobileLayoutStyle',
+      'scrollAutoMove'
     ])
   },
 
@@ -421,8 +448,17 @@ export default {
         this.recordStyleChange(this.$store.state.styleChangeTimes)
       }
     },
-    mobileLayoutStatus() {
+    mobileLayoutStatus(value) {
       this.restore()
+    },
+    attackBoundary(value) {
+      // console.log('attackBoundary:' + value)
+      this.destroyTimer()
+      if (this.mobileLayoutStatus && this.curComponent && this.curComponent.optStatus.dragging) {
+        if (value === 'toBottom') {
+          this.scrollMove()
+        }
+      }
     }
   },
   created() {
@@ -857,6 +893,7 @@ export default {
     canvasScroll(event) {
       this.scrollLeft = event.target.scrollLeft
       this.scrollTop = event.target.scrollTop
+      // console.log('canvasScroll:' + this.scrollTop)
       bus.$emit('onScroll')
     },
     destroyTimeMachine() {
@@ -881,7 +918,38 @@ export default {
     },
     sureStatusChange(status) {
       this.enableSureButton = status
+    },
+    scrollMove() {
+      const _this = this
+      // 获取父盒子（肯定有滚动条）
+      const canvasInfoMobile = document.getElementById('canvasInfoMobile')
+      // 获取子盒子（高度肯定比父盒子大）
+      const editorMobile = document.getElementById('editorMobile')
+      this.timer = setInterval(function() {
+        if (canvasInfoMobile.offsetHeight + canvasInfoMobile.scrollTop >= editorMobile.scrollHeight) {
+          console.log('触底...')
+          // canvasInfoMobile.scrollTop = 0
+          // _this.$store.commit('setScrollAutoMove', 0)
+          _this.destroyTimer()
+        } else {
+          // 如果存在网页缩放，很有可能没有效果，但是else部分的代码会执行
+          // 原因：刚才讲到的scrollTop三个注意中标黄的一条
+          // 设置scrollTop的值小于0，即scrollTop被设为0
+          // 可以缩放跑一下，然后不刷新的状态下恢复百分之百跑一下，再缩放，打印scrollTop的值
+          // 你会发现正常尺寸执行时打印的第一个值不是加法，而是减法，即scrollTop++增加负值
+          // 这样的话就对应上了scrollTop的注意点了，增加的值小于0，就被设为0
+          canvasInfoMobile.scrollTop = canvasInfoMobile.scrollTop + 10
+          _this.$store.commit('setScrollAutoMove', _this.scrollAutoMove + 10)
+        }
+      }, 20)
+    },
+    destroyTimer() {
+      if (this.timer) {
+        clearInterval(this.timer)
+        this.timer = null
+      }
     }
+
   }
 }
 </script>

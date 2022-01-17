@@ -124,7 +124,6 @@ export default {
     createTimer() {
       if (!this.timer) {
         this.timer = setInterval(() => {
-          console.log('t=' + this.curComponent.auxiliaryMatrix)
         }, 5000)
       }
     },

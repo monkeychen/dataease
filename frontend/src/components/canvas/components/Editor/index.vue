@@ -1241,7 +1241,6 @@ export default {
       this.timeMachine = null
     },
     openChartDetailsDialog(chartInfo) {
-      debugger
       this.showChartInfo = chartInfo.chart
       this.showChartTableInfo = chartInfo.tableChart
       this.chartDetailsVisible = true
@@ -1398,7 +1397,7 @@ export default {
       const vm = this
       scrollScreen(e)
       if (!vm.draggable) return
-      vm.dragging.call(null, e, moveItem, moveItem._dragId)
+      moveItem._dragId && vm.dragging.call(null, e, moveItem, moveItem._dragId)
 
       vm.$set(moveItem, 'isPlayer', true)
       const oldX = infoBox.oldX
