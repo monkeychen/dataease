@@ -62,6 +62,7 @@
                   <svg-icon v-if="data.modelInnerType === 'excel'" icon-class="ds-excel" class="ds-icon-excel" />
                   <svg-icon v-if="data.modelInnerType === 'custom'" icon-class="ds-custom" class="ds-icon-custom" />
                   <svg-icon v-if="data.modelInnerType === 'union'" icon-class="ds-union" class="ds-icon-union" />
+                  <svg-icon v-if="data.modelInnerType === 'api'" icon-class="ds-api" class="ds-icon-api" />
                 </span>
                 <span v-if="data.modelInnerType === 'db' || data.modelInnerType === 'sql'">
                   <span v-if="data.mode === 0" style="margin-left: 6px"><i class="el-icon-s-operation" /></span>
@@ -78,8 +79,8 @@
 </template>
 
 <script>
-import { isKettleRunning, post } from '@/api/dataset/dataset'
 import { queryAuthModel } from '@/api/authModel/authModel'
+import { post } from '@/api/dataset/dataset'
 export default {
   name: 'DatasetGroupSelectorTree',
   props: {
@@ -143,7 +144,6 @@ export default {
         all: this.$t('commons.all'),
         folder: this.$t('commons.folder')
       },
-      kettleRunning: false,
       sceneMode: false,
       search: '',
       data: [],
@@ -199,14 +199,8 @@ export default {
     this.treeNode()
   },
   created() {
-    this.kettleState()
   },
   methods: {
-    kettleState() {
-      isKettleRunning(false).then(res => {
-        this.kettleRunning = res.data
-      })
-    },
     close() {
       this.editGroup = false
       this.groupForm = {

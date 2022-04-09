@@ -55,6 +55,9 @@
       @amRemoveItem="removeItem(item._dragId)"
       @amAddItem="addItemBox(item)"
       @linkJumpSet="linkJumpSet(item)"
+      @boardSet="boardSet(item)"
+      @canvasDragging="canvasDragging"
+      @editComponent="editComponent(index,item)"
     >
       <component
         :is="item.component"
@@ -100,6 +103,7 @@
         :id="'component' + item.id"
         ref="wrapperChild"
         class="component"
+        :filters="filterMap[item.propValue && item.propValue.viewId]"
         :style="getComponentStyleDefault(item.style)"
         :prop-value="item.propValue"
         :element="item"
@@ -157,13 +161,25 @@
 
     <el-dialog
       :visible.sync="linkJumpSetVisible"
-      width="60%"
+      width="900px"
       class="dialog-css"
       :show-close="true"
       :destroy-on-close="true"
       :append-to-body="true"
     >
       <LinkJumpSet v-if="linkJumpSetVisible" :view-id="linkJumpSetViewId" @closeJumpSetDialog="closeJumpSetDialog" />
+    </el-dialog>
+
+    <el-dialog
+      :visible.sync="boardSetVisible"
+      width="750px"
+      class="dialog-css"
+      :close-on-click-modal="false"
+      :show-close="false"
+      :destroy-on-close="true"
+      :append-to-body="true"
+    >
+      <background v-if="boardSetVisible" @backgroundSetClose="backgroundSetClose" />
     </el-dialog>
   </div>
 </template>
@@ -190,10 +206,11 @@ import CanvasOptBar from '@/components/canvas/components/Editor/CanvasOptBar'
 import DragShadow from '@/components/DeDrag/shadow'
 import bus from '@/utils/bus'
 import LinkJumpSet from '@/views/panel/LinkJumpSet'
-
+import { buildFilterMap } from '@/utils/conditionUtil'
 // 挤占式画布
 import _ from 'lodash'
 import $ from 'jquery'
+import Background from '@/views/background/index'
 
 let positionBox = []
 let coordinates = [] // 坐标点集合
@@ -760,7 +777,7 @@ function getoPsitionBox() {
 }
 
 export default {
-  components: { Shape, ContextMenu, MarkLine, Area, Grid, PGrid, DeDrag, UserViewDialog, DeOutWidget, CanvasOptBar, DragShadow, LinkJumpSet },
+  components: { Background, Shape, ContextMenu, MarkLine, Area, Grid, PGrid, DeDrag, UserViewDialog, DeOutWidget, CanvasOptBar, DragShadow, LinkJumpSet },
   props: {
     isEdit: {
       type: Boolean,
@@ -825,6 +842,7 @@ export default {
   },
   data() {
     return {
+      boardSetVisible: false,
       psDebug: false, // 定位调试模式
       editorX: 0,
       editorY: 0,
@@ -929,6 +947,7 @@ export default {
     dragComponentInfo() {
       return this.$store.state.dragComponentInfo
     },
+
     ...mapState([
       'componentData',
       'curComponent',
@@ -938,8 +957,12 @@ export default {
       'curLinkageView',
       'doSnapshotIndex',
       'componentGap',
-      'mobileLayoutStatus'
-    ])
+      'mobileLayoutStatus',
+      'curCanvasScale'
+    ]),
+    filterMap() {
+      return buildFilterMap(this.componentData)
+    }
   },
   watch: {
     customStyle: {
@@ -1006,6 +1029,13 @@ export default {
   created() {
   },
   methods: {
+    backgroundSetClose() {
+      this.boardSetVisible = false
+    },
+    boardSet(item) {
+      this.$emit('boardSet', item)
+      this.boardSetVisible = true
+    },
     changeStyleWithScale,
     handleMouseDown(e) {
       // 如果没有选中组件 在画布上点击时需要调用 e.preventDefault() 防止触发 drop 事件
@@ -1241,7 +1271,6 @@ export default {
       this.timeMachine = null
     },
     openChartDetailsDialog(chartInfo) {
-      debugger
       this.showChartInfo = chartInfo.chart
       this.showChartTableInfo = chartInfo.tableChart
       this.chartDetailsVisible = true
@@ -1256,6 +1285,11 @@ export default {
     resizeView(index, item) {
       if (item.type === 'view' || item.type === 'de-show-date') {
         this.$refs.wrapperChild[index].chartResize()
+      }
+    },
+    editComponent(index, item) {
+      if (item.type === 'view') {
+        this.$refs.wrapperChild[index].editChart()
       }
     },
     handleDragOver(e) {
@@ -1533,6 +1567,9 @@ export default {
       _this.componentData.forEach(function(data, index) {
         _this.$refs.deDragRef && _this.$refs.deDragRef[index] && _this.$refs.deDragRef[index].checkParentSize()
       })
+    },
+    canvasDragging(mY, offsetY) {
+      this.$emit('canvasDragging', mY, offsetY)
     }
   }
 }

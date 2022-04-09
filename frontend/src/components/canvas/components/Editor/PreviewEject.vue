@@ -6,10 +6,10 @@
 <script>
 import Preview from './Preview'
 import { uuid } from 'vue-uuid'
-import { findOne } from '@/api/panel/panel'
-import { getPanelAllLinkageInfo } from '@/api/panel/linkage'
-import { queryPanelJumpInfo, queryTargetPanelJumpInfo } from '@/api/panel/linkJump'
-import { panelInit } from '@/components/canvas/utils/utils'
+import { initPanelData } from '@/api/panel/panel'
+import { queryTargetPanelJumpInfo } from '@/api/panel/linkJump'
+import { proxyInitPanelData } from '@/api/panel/shareProxy'
+import { getOuterParamsInfo } from '@/api/panel/outerParams'
 
 export default {
   components: { Preview },
@@ -17,7 +17,8 @@ export default {
     return {
       dataLoading: false,
       backScreenShot: false,
-      mainHeight: '100vh!important'
+      mainHeight: '100vh!important',
+      shareUserId: null
     }
   },
   computed: {
@@ -29,6 +30,12 @@ export default {
       }
     }
   },
+  watch: {
+    '$route.params.reportId': function() {
+      this.restore()
+    }
+  },
+
   mounted() {
     this.restore()
   },
@@ -37,52 +44,93 @@ export default {
       this.mainHeight = mainHeight
     },
     restore() {
-      this.dataLoading = true
-      this.panelId = this.$route.params.reportId
-      if (this.$route.params.backScreenShot !== undefined) {
-        this.backScreenShot = this.$route.params.backScreenShot
+      const _this = this
+      _this.dataLoading = true
+      if (!this.$route.params.reportId) {
+        return
+      }
+      const arr = this.$route.params.reportId.split('|')
+      if (!arr || arr.length === 0) {
+        return
+      }
+      _this.panelId = arr[0]
+
+      if (arr.length > 1) {
+        this.shareUserId = arr[1]
+      }
+
+      if (_this.$route.params.backScreenShot !== undefined) {
+        _this.backScreenShot = _this.$route.params.backScreenShot
       }
       // 加载视图数据
-      findOne(this.panelId).then(response => {
-        const componentDatas = JSON.parse(response.data.panelData)
-        panelInit(componentDatas)
-        this.dataLoading = false
-        this.$store.commit('setComponentData', this.resetID(componentDatas))
-        this.$store.commit('setCanvasStyle', JSON.parse(response.data.panelStyle))
-        const data = {
-          id: response.data.id,
-          name: response.data.name
-        }
-        // 刷新联动信息
-        getPanelAllLinkageInfo(this.panelId).then(rsp => {
-          this.$store.commit('setNowPanelTrackInfo', rsp.data)
+      if (this.shareUserId !== null) {
+        const param = { userId: this.shareUserId }
+        proxyInitPanelData(this.panelId, param, () => {
+          this.initCallBack()
         })
-        // 刷新跳转信息
-        queryPanelJumpInfo(this.panelId).then(rsp => {
-          this.$store.commit('setNowPanelJumpInfo', rsp.data)
+      } else {
+        initPanelData(this.panelId, () => {
+          this.initCallBack()
         })
+      }
+    },
 
-        // 如果含有跳转参数 进行触发
-        const tempParam = localStorage.getItem('jumpInfoParam')
-        if (tempParam) {
-          localStorage.removeItem('jumpInfoParam')
-          const jumpParam = JSON.parse(tempParam)
-          const jumpRequestParam = {
-            sourcePanelId: jumpParam.sourcePanelId,
-            sourceViewId: jumpParam.sourceViewId,
-            sourceFieldId: jumpParam.sourceFieldId,
-            targetPanelId: this.panelId
+    initCallBack() {
+      this.dataLoading = true
+      let loadingCount = 0
+      // 如果含有跳转参数 进行触发
+      const tempParam = localStorage.getItem('jumpInfoParam')
+      // 添加外部参数
+      const attachParamsEncode = this.$route.query.attachParams
+      tempParam && loadingCount++
+      attachParamsEncode && loadingCount++
+
+      if (attachParamsEncode) {
+        try {
+          const Base64 = require('js-base64').Base64
+          const attachParam = JSON.parse(Base64.decode(attachParamsEncode))
+          getOuterParamsInfo(this.panelId).then(rsp => {
+            if (--loadingCount === 0) {
+              this.dataLoading = false
+            }
+            this.$store.commit('setNowPanelOuterParamsInfo', rsp.data)
+            this.$store.commit('addOuterParamsFilter', attachParam)
+          })
+        } catch (e) {
+          if (--loadingCount === 0) {
+            this.dataLoading = false
           }
-          this.dataLoading = true
+          console.log('outerParams Deocode error：', e)
+        }
+      }
+      if (tempParam) {
+        localStorage.removeItem('jumpInfoParam')
+        const jumpParam = JSON.parse(tempParam)
+        const jumpRequestParam = {
+          sourcePanelId: jumpParam.sourcePanelId,
+          sourceViewId: jumpParam.sourceViewId,
+          sourceFieldId: jumpParam.sourceFieldId,
+          targetPanelId: this.panelId
+        }
+        try {
           // 刷新跳转目标仪表板联动信息
           queryTargetPanelJumpInfo(jumpRequestParam).then(rsp => {
-            this.dataLoading = false
+            if (--loadingCount === 0) {
+              this.dataLoading = false
+            }
             this.$store.commit('setNowTargetPanelJumpInfo', rsp.data)
             this.$store.commit('addViewTrackFilter', jumpParam)
           })
+        } catch (e) {
+          if (--loadingCount === 0) {
+            this.dataLoading = false
+          }
+          console.log('queryTargetPanelJumpInfo error：', e)
         }
-        this.$store.dispatch('panel/setPanelInfo', data)
-      })
+      }
+      if (loadingCount === 0) {
+        this.dataLoading = false
+      }
     },
     resetID(data) {
       if (data) {

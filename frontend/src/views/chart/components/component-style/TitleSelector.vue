@@ -1,7 +1,7 @@
 <template>
   <div style="width: 100%">
     <el-col>
-      <el-form ref="titleForm" :model="titleForm" label-width="80px" size="mini" :disabled="!hasDataPermission('manage',param.privileges)">
+      <el-form ref="titleForm" :model="titleForm" label-width="80px" size="mini">
         <el-form-item :label="$t('chart.show')" class="form-item">
           <el-checkbox v-model="titleForm.show" @change="changeTitleStyle">{{ $t('chart.show') }}</el-checkbox>
         </el-form-item>
@@ -50,6 +50,7 @@
 
 <script>
 import { COLOR_PANEL, DEFAULT_TITLE_STYLE } from '../../chart/chart'
+import { checkTitle } from '@/api/chart/chart'
 
 export default {
   name: 'TitleSelector',
@@ -114,10 +115,18 @@ export default {
         this.titleForm.title = this.chart.title
         return
       }
-      if (!this.titleForm.show) {
-        this.isSetting = false
-      }
-      this.$emit('onTextChange', this.titleForm)
+      checkTitle({ id: this.chart.id, title: this.titleForm.title, sceneId: this.chart.sceneId }).then((rsp) => {
+        if (rsp.data === 'success') {
+          if (!this.titleForm.show) {
+            this.isSetting = false
+          }
+          this.$emit('onTextChange', this.titleForm)
+        } else {
+          this.$error(this.$t('chart.title_repeat'))
+          this.titleForm.title = this.chart.title
+          return
+        }
+      })
     },
     inputOnInput: function(e) {
       this.$forceUpdate()

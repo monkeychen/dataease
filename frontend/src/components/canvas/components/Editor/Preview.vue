@@ -20,6 +20,8 @@
           :search-count="searchCount"
           :in-screen="inScreen"
           :terminal="terminal"
+          :filters="filterMap[item.propValue && item.propValue.viewId]"
+          :screen-shot="screenShot"
         />
         <!--视图详情-->
         <el-dialog
@@ -40,7 +42,6 @@
 
         <!--手机视图详情-->
         <el-dialog
-          :title="'['+showChartInfo.name+']'+$t('chart.chart_details')"
           :visible.sync="mobileChartDetailsVisible"
           :fullscreen="true"
           class="mobile-dialog-css"
@@ -66,7 +67,7 @@ import UserViewDialog from '@/components/canvas/custom-component/UserViewDialog'
 import CanvasOptBar from '@/components/canvas/components/Editor/CanvasOptBar'
 import UserViewMobileDialog from '@/components/canvas/custom-component/UserViewMobileDialog'
 import bus from '@/utils/bus'
-
+import { buildFilterMap } from '@/utils/conditionUtil'
 export default {
   components: { UserViewMobileDialog, ComponentWrapper, UserViewDialog, CanvasOptBar },
   model: {
@@ -194,7 +195,11 @@ export default {
       'componentData',
       'canvasStyleData',
       'componentGap'
-    ])
+    ]),
+    filterMap() {
+      const map = buildFilterMap(this.componentData)
+      return map
+    }
   },
   watch: {
     componentData: {
@@ -297,7 +302,11 @@ export default {
               component.style[key] = this.format(component.style[key], this.scaleHeight)
             }
             if (this.needToChangeWidth.includes(key)) {
-              component.style[key] = this.format(component.style[key], this.scaleWidth)
+              if (key === 'fontSize' && this.terminal === 'mobile') {
+                // do nothing 移动端字符大小无需按照比例缩放，当前保持不变(包括 v-text 和 过滤组件)
+              } else {
+                component.style[key] = this.format(component.style[key], this.scaleWidth)
+              }
             }
           })
         })
@@ -372,6 +381,10 @@ export default {
 
   .dialog-css > > > .el-dialog__body {
     padding: 10px 20px 20px;
+  }
+
+  .mobile-dialog-css > > > .el-dialog__headerbtn {
+    top: 7px
   }
 
   .mobile-dialog-css > > > .el-dialog__body {

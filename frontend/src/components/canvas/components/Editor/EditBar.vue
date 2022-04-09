@@ -6,7 +6,7 @@
       <linkage-field v-if="linkageInfo.linkageActive" :element="element" />
     </div>
     <div v-if="normalAreaShow">
-      <setting-menu v-if="activeModel==='edit'" style="float: right;height: 24px!important;" @amRemoveItem="amRemoveItem" @linkJumpSet="linkJumpSet">
+      <setting-menu v-if="activeModel==='edit'" style="float: right;height: 24px!important;" @amRemoveItem="amRemoveItem" @linkJumpSet="linkJumpSet" @boardSet="boardSet">
         <span slot="icon" :title="$t('panel.setting')">
           <i class="icon iconfont icon-shezhi" style="margin-top:2px" />
         </span>
@@ -102,6 +102,16 @@ export default {
     linkageInfo() {
       return this.targetLinkageInfo[this.element.propValue.viewId]
     },
+    miniHeight() {
+      let miniHeight = this.curComponent.miniSizey || 1
+      if (this.element.component === 'de-number-range') {
+        miniHeight = this.curComponent.miniSizey || 2
+      }
+      return miniHeight
+    },
+    miniWidth() {
+      return this.curComponent.miniSizex || 1
+    },
     ...mapState([
       'menuTop',
       'menuLeft',
@@ -146,6 +156,8 @@ export default {
         this.curComponent.y = Math.round(this.curComponent.style.top / this.curCanvasScale.matrixStyleOriginHeight) + 1
         this.curComponent.sizex = Math.round(this.curComponent.style.width / this.curCanvasScale.matrixStyleOriginWidth)
         this.curComponent.sizey = Math.round(this.curComponent.style.height / this.curCanvasScale.matrixStyleOriginHeight)
+        this.curComponent.sizey = this.curComponent.sizey > this.miniHeight ? this.curComponent.sizey : this.miniHeight
+        this.curComponent.sizex = this.curComponent.sizex > this.miniWidth ? this.curComponent.sizex : this.miniWidth
         this.curComponent.auxiliaryMatrix = true
         this.$emit('amAddItem')
       }
@@ -157,7 +169,6 @@ export default {
     },
     // 记录当前样式 跟随阴影位置 矩阵处理
     recordMatrixCurShadowStyle() {
-      // debugger
       const left = (this.curComponent.x - 1) * this.curCanvasScale.matrixStyleWidth
       const top = (this.curComponent.y - 1) * this.curCanvasScale.matrixStyleHeight
       const width = this.curComponent.sizex * this.curCanvasScale.matrixStyleWidth
@@ -172,22 +183,29 @@ export default {
       // resize
       this.$emit('resizeView')
     },
+    // edit() {
+    //   // 编辑时临时保存 当前修改的画布
+    //   this.$store.dispatch('panel/setComponentDataTemp', JSON.stringify(this.componentData))
+    //   this.$store.dispatch('panel/setCanvasStyleDataTemp', JSON.stringify(this.canvasStyleData))
+    //   if (this.curComponent.type === 'view') {
+    //     this.$store.dispatch('chart/setViewId', null)
+    //     this.$store.dispatch('chart/setViewId', this.curComponent.propValue.viewId)
+    //     bus.$emit('PanelSwitchComponent', { name: 'ChartEdit', param: { 'id': this.curComponent.propValue.viewId, 'optType': 'edit' }})
+    //   }
+    //   if (this.curComponent.type === 'custom') {
+    //     bus.$emit('component-dialog-edit')
+    //   }
+    //   // 编辑样式组件
+    //   if (this.curComponent.type === 'v-text' || this.curComponent.type === 'rect-shape') {
+    //     bus.$emit('component-dialog-style')
+    //   }
+    // },
     edit() {
-      // 编辑时临时保存 当前修改的画布
-      this.$store.dispatch('panel/setComponentDataTemp', JSON.stringify(this.componentData))
-      this.$store.dispatch('panel/setCanvasStyleDataTemp', JSON.stringify(this.canvasStyleData))
-      if (this.curComponent.type === 'view') {
-        this.$store.dispatch('chart/setViewId', null)
-        this.$store.dispatch('chart/setViewId', this.curComponent.propValue.viewId)
-        bus.$emit('PanelSwitchComponent', { name: 'ChartEdit', param: { 'id': this.curComponent.propValue.viewId, 'optType': 'edit' }})
-      }
       if (this.curComponent.type === 'custom') {
         bus.$emit('component-dialog-edit')
-      }
-      // 编辑样式组件
-      if (this.curComponent.type === 'v-text' || this.curComponent.type === 'rect-shape') {
+      } else if (this.curComponent.type === 'v-text' || this.curComponent.type === 'rect-shape') {
         bus.$emit('component-dialog-style')
-      }
+      } else { bus.$emit('change_panel_right_draw', true) }
     },
     linkageEdit() {
 
@@ -230,6 +248,9 @@ export default {
       }
 
       reader.readAsDataURL(file)
+    },
+    boardSet() {
+      this.$emit('boardSet')
     }
   }
 }

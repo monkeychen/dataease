@@ -5,7 +5,6 @@ import io.dataease.base.domain.DatasetTable;
 import io.dataease.base.domain.DatasetTableField;
 import io.dataease.base.domain.Datasource;
 import io.dataease.commons.constants.ColumnPermissionConstants;
-import io.dataease.commons.utils.CommonBeanFactory;
 import io.dataease.dto.chart.ChartFieldCustomFilterDTO;
 import io.dataease.i18n.Translator;
 import io.dataease.provider.datasource.DatasourceProvider;
@@ -15,7 +14,8 @@ import io.dataease.service.dataset.*;
 import io.dataease.service.datasource.DatasourceService;
 import io.dataease.dto.dataset.DataSetTableUnionDTO;
 import io.dataease.dto.dataset.DataTableInfoDTO;
-import io.dataease.provider.query.QueryProvider;
+import io.dataease.provider.QueryProvider;
+import io.dataease.service.engine.EngineService;
 import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.lang3.ObjectUtils;
 import org.apache.commons.lang3.StringUtils;
@@ -40,9 +40,11 @@ public class DirectFieldService implements DataSetFieldService {
     private DataSetTableUnionService dataSetTableUnionService;
     @Resource
     private PermissionService permissionService;
+    @Resource
+    private EngineService engineService;
 
     @Override
-    public List<Object> fieldValues(String fieldId, Long userId) throws Exception {
+    public List<Object> fieldValues(String fieldId, Long userId, Boolean userPermissions) throws Exception {
         DatasetTableField field = dataSetTableFieldsService.selectByPrimaryKey(fieldId);
         if (field == null || StringUtils.isEmpty(field.getTableId())) return null;
 
@@ -52,17 +54,23 @@ public class DirectFieldService implements DataSetFieldService {
         DatasetTableField datasetTableField = DatasetTableField.builder().tableId(field.getTableId()).checked(Boolean.TRUE).build();
         List<DatasetTableField> fields = dataSetTableFieldsService.list(datasetTableField);
 
-        //列权限
-        List<String> desensitizationList = new ArrayList<>();
-        fields = permissionService.filterColumnPermissons(fields, desensitizationList, datasetTable, userId);
-
-        if (CollectionUtils.isNotEmpty(desensitizationList) && desensitizationList.contains(field.getDataeaseName())) {
-            List<Object> results = new ArrayList<>();
-            results.add(ColumnPermissionConstants.Desensitization_desc);
-            return results;
+        List<ChartFieldCustomFilterDTO> customFilter = new ArrayList<>();
+        if(userPermissions){
+            //列权限
+            List<String> desensitizationList = new ArrayList<>();
+            fields = permissionService.filterColumnPermissons(fields, desensitizationList, datasetTable.getId(), userId);
+            //禁用的
+            if(!fields.stream().map(DatasetTableField::getId).collect(Collectors.toList()).contains(fieldId)){
+                return new ArrayList<>();
+            }
+            if (CollectionUtils.isNotEmpty(desensitizationList) && desensitizationList.contains(field.getDataeaseName())) {
+                List<Object> results = new ArrayList<>();
+                results.add(ColumnPermissionConstants.Desensitization_desc);
+                return results;
+            }
+            //行权限
+            customFilter = permissionService.getCustomFilters(fields, datasetTable, userId);
         }
-        //行权限
-        List<ChartFieldCustomFilterDTO> customFilter = permissionService.getCustomFilters(fields, datasetTable, userId);
 
         DatasourceRequest datasourceRequest = new DatasourceRequest();
         DatasourceProvider datasourceProvider = null;
@@ -94,7 +102,7 @@ public class DirectFieldService implements DataSetFieldService {
             }
         } else if (datasetTable.getMode() == 1) {// 抽取
             // 连接doris，构建doris数据源查询
-            Datasource ds = (Datasource) CommonBeanFactory.getBean("DorisDatasource");
+            Datasource ds = engineService.getDeEngine();
             datasourceProvider = ProviderFactory.getProvider(ds.getType());
             datasourceRequest = new DatasourceRequest();
             datasourceRequest.setDatasource(ds);

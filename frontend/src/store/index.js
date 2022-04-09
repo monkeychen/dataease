@@ -79,6 +79,8 @@ const data = {
     nowPanelJumpInfo: {},
     // 当前仪表板的跳转信息(只包括仪表板)
     nowPanelJumpInfoTargetPanel: {},
+    // 当前仪表板的外部参数信息
+    nowPanelOuterParamsInfo: {},
     // 拖拽的组件信息
     dragComponentInfo: null,
     // 仪表板组件间隙大小 px
@@ -98,7 +100,12 @@ const data = {
     mobileLayoutStyle: {
       x: 300,
       y: 600
-    }
+    },
+    scrollAutoMove: 0,
+    // 视图是否编辑记录
+    panelViewEditInfo: {},
+    // 仪表板视图明细
+    panelViewDetailsInfo: {}
   },
   mutations: {
     ...animation.mutations,
@@ -202,20 +209,35 @@ const data = {
 
       for (let index = 0; index < state.componentData.length; index++) {
         const element = state.componentData[index]
+        if (element.type && element.type === 'de-tabs') {
+          for (let idx = 0; idx < element.options.tabList.length; idx++) {
+            const ele = element.options.tabList[idx].content
+            if (!ele.type || ele.type !== 'view') continue
+            const currentFilters = ele.filters || []
+            const vidMatch = viewIdMatch(condition.viewIds, ele.propValue.viewId)
+
+            let jdx = currentFilters.length
+            while (jdx--) {
+              const filter = currentFilters[jdx]
+              if (filter.componentId === filterComponentId) {
+                currentFilters.splice(jdx, 1)
+              }
+            }
+            // 不存在该条件 且 条件有效 直接保存该条件
+            // !filterExist && vValid && currentFilters.push(condition)
+            vidMatch && vValid && currentFilters.push(condition)
+            ele.filters = currentFilters
+          }
+          state.componentData[index] = element
+        }
         if (!element.type || element.type !== 'view') continue
         const currentFilters = element.filters || []
         const vidMatch = viewIdMatch(condition.viewIds, element.propValue.viewId)
 
         let j = currentFilters.length
-        // let filterExist = false
         while (j--) {
           const filter = currentFilters[j]
           if (filter.componentId === filterComponentId) {
-            // filterExist = true
-            // 已存在该条件 且 条件值有效 直接替换原体检
-            // vidMatch && vValid && (currentFilters[j] = condition)
-            // 已存在该条件 且 条件值无效 直接删除原条件
-            // vidMatch && !vValid && (currentFilters.splice(j, 1))
             currentFilters.splice(j, 1)
           }
         }
@@ -238,8 +260,47 @@ const data = {
       }
       for (let index = 0; index < state.componentData.length; index++) {
         const element = state.componentData[index]
+        if (element.type && element.type === 'de-tabs') {
+          for (let idx = 0; idx < element.options.tabList.length; idx++) {
+            const ele = element.options.tabList[idx].content
+            if (!ele.type || ele.type !== 'view') continue
+
+            const currentFilters = []
+
+            data.dimensionList.forEach(dimension => {
+              const sourceInfo = viewId + '#' + dimension.id
+              // 获取所有目标联动信息
+              const targetInfoList = trackInfo[sourceInfo] || []
+              targetInfoList.forEach(targetInfo => {
+                const targetInfoArray = targetInfo.split('#')
+                const targetViewId = targetInfoArray[0] // 目标视图
+                if (ele.propValue.viewId === targetViewId) { // 如果目标视图 和 当前循环组件id相等 则进行条件增减
+                  const targetFieldId = targetInfoArray[1] // 目标视图列ID
+                  const condition = new Condition('', targetFieldId, 'eq', [dimension.value], [targetViewId])
+                  condition.sourceViewId = viewId
+                  let j = currentFilters.length
+                  while (j--) {
+                    const filter = currentFilters[j]
+                    // 兼容性准备 viewIds 只会存放一个值
+                    if (targetFieldId === filter.fieldId && filter.viewIds.includes(targetViewId)) {
+                      currentFilters.splice(j, 1)
+                    }
+                  }
+                  // 不存在该条件 且 条件有效 直接保存该条件
+                  // !filterExist && vValid && currentFilters.push(condition)
+                  currentFilters.push(condition)
+                }
+              })
+            })
+
+            ele.linkageFilters = currentFilters
+          }
+          state.componentData[index] = element
+        }
         if (!element.type || element.type !== 'view') continue
-        const currentFilters = element.linkageFilters || [] // 当前联动filter
+        // const currentFilters = element.linkageFilters || [] // 当前联动filter
+        // 联动的视图情况历史条件
+        const currentFilters = []
 
         data.dimensionList.forEach(dimension => {
           const sourceInfo = viewId + '#' + dimension.id
@@ -271,6 +332,50 @@ const data = {
         state.componentData[index] = element
       }
     },
+    // 添加外部参数的过滤条件
+    addOuterParamsFilter(state, params) {
+      // params 结构 {key1:value1,key2:value2}
+      if (params) {
+        const trackInfo = state.nowPanelOuterParamsInfo
+
+        for (let index = 0; index < state.componentData.length; index++) {
+          const element = state.componentData[index]
+          if (!element.type || element.type !== 'view') continue
+          const currentFilters = element.outerParamsFilters || [] // 外部参数信息
+
+          // 外部参数 可能会包含多个参数
+          Object.keys(params).forEach(function(sourceInfo) {
+            // 获取外部参数的值 sourceInfo 是外部参数名称
+            const paramValue = params[sourceInfo]
+            // 获取所有目标联动信息
+            const targetInfoList = trackInfo[sourceInfo] || []
+
+            targetInfoList.forEach(targetInfo => {
+              const targetInfoArray = targetInfo.split('#')
+              const targetViewId = targetInfoArray[0] // 目标视图
+              if (element.propValue.viewId === targetViewId) { // 如果目标视图 和 当前循环组件id相等 则进行条件增减
+                const targetFieldId = targetInfoArray[1] // 目标视图列ID
+                const condition = new Condition('', targetFieldId, 'eq', [paramValue], [targetViewId])
+                let j = currentFilters.length
+                while (j--) {
+                  const filter = currentFilters[j]
+                  // 兼容性准备 viewIds 只会存放一个值
+                  if (targetFieldId === filter.fieldId && filter.viewIds.includes(targetViewId)) {
+                    currentFilters.splice(j, 1)
+                  }
+                }
+                // 不存在该条件 且 条件有效 直接保存该条件
+                // !filterExist && vValid && currentFilters.push(condition)
+                currentFilters.push(condition)
+              }
+            })
+            element.outerParamsFilters = currentFilters
+            state.componentData[index] = element
+          })
+        }
+      }
+    },
+
     setComponentWithId(state, component) {
       for (let index = 0; index < state.componentData.length; index++) {
         const element = state.componentData[index]
@@ -315,6 +420,9 @@ const data = {
     },
     setNowTargetPanelJumpInfo(state, jumpInfo) {
       state.nowPanelJumpInfoTargetPanel = jumpInfo.baseJumpInfoPanelMap
+    },
+    setNowPanelOuterParamsInfo(state, outerParamsInfo) {
+      state.nowPanelOuterParamsInfo = outerParamsInfo.outerParamsInfoMap
     },
     clearPanelLinkageInfo(state) {
       state.componentData.forEach(item => {
@@ -371,6 +479,20 @@ const data = {
       })
       state.componentData = mainComponentData
       state.mobileLayoutStatus = !state.mobileLayoutStatus
+    },
+    setScrollAutoMove(state, offset) {
+      state.scrollAutoMove = offset
+    },
+    initPanelComponents(state, panelComponents) {
+      if (panelComponents) {
+        state.canvasStyleData['panelComponents'] = panelComponents
+      }
+    },
+    recordViewEdit(state, viewInfo) {
+      state.panelViewEditInfo[viewInfo.viewId] = viewInfo.hasEdit
+    },
+    resetViewEditInfo(state) {
+      state.panelViewEditInfo = {}
     }
   },
   modules: {

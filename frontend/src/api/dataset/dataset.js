@@ -77,6 +77,14 @@ export function listDatasource() {
   })
 }
 
+export function listApiDatasource() {
+  return request({
+    url: '/datasource/list/api',
+    loading: true,
+    method: 'get'
+  })
+}
+
 export function getTable(id, hideMsg = false) {
   return request({
     url: '/dataset/table/get/' + id,
@@ -98,6 +106,14 @@ export function getPreviewData(data) {
 export function fieldList(id, showLoading = true) {
   return request({
     url: '/dataset/field/list/' + id,
+    loading: showLoading,
+    method: 'post'
+  })
+}
+
+export function fieldListWithPermission(id, showLoading = true) {
+  return request({
+    url: '/dataset/field/listWithPermission/' + id,
     loading: showLoading,
     method: 'post'
   })
@@ -197,5 +213,5 @@ export function checkCustomDs() {
     loading: true
   })
 }
-
+export const disabledSyncDs= ['es', 'ck', 'mongo', 'redshift', 'hive', 'impala']
 export default { loadTable, getScene, addGroup, delGroup, addTable, delTable, groupTree, checkCustomDs }

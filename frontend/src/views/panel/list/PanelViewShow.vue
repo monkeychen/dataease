@@ -68,6 +68,12 @@
               </el-tooltip>
             </span>
 
+            <span style="float: right;margin-right: 10px">
+              <el-tooltip :content="$t('commons.refresh')">
+                <el-button class="el-icon-refresh" size="mini" circle @click="refreshPanel" />
+              </el-tooltip>
+            </span>
+
           </el-col>
         </div>
       </el-row>
@@ -130,7 +136,8 @@ import { starStatus, saveEnshrine, deleteEnshrine } from '@/api/panel/enshrine'
 import bus from '@/utils/bus'
 import { queryAll } from '@/api/panel/pdfTemplate'
 import ShareHead from '@/views/panel/GrantAuth/ShareHead'
-
+import { initPanelData } from '@/api/panel/panel'
+import { proxyInitPanelData } from '@/api/panel/shareProxy'
 export default {
   name: 'PanelViewShow',
   components: { Preview, SaveToTemplate, PDFPreExport, ShareHead },
@@ -155,15 +162,16 @@ export default {
       snapshotInfo: '',
       showType: 0,
       dataLoading: false,
-      exporting: false
+      exporting: false,
+      shareUserId: null
     }
   },
   computed: {
     imageWrapperStyle() {
       if (this.exporting) {
         return {
-          width: '4096px',
-          height: '2160px'
+          width: '2560px',
+          height: '1440px'
         }
       } else {
         return {
@@ -180,7 +188,8 @@ export default {
     },
     ...mapState([
       'componentData',
-      'canvasStyleData'
+      'canvasStyleData',
+      'panelViewDetailsInfo'
     ])
   },
   watch: {
@@ -206,6 +215,9 @@ export default {
     bus.$on('set-panel-show-type', type => {
       this.showType = type || 0
     })
+    bus.$on('set-panel-share-user', userId => {
+      this.shareUserId = userId
+    })
     this.initPdfTemplate()
   },
   methods: {
@@ -219,7 +231,10 @@ export default {
       this.fullscreen = true
     },
     newTab() {
-      const url = '#/preview/' + this.$store.state.panel.panelInfo.id
+      let url = '#/preview/' + this.$store.state.panel.panelInfo.id
+      if (this.showType === 1 && this.shareUserId !== null) {
+        url += ('|' + this.shareUserId)
+      }
       window.open(url, '_blank')
     },
     saveToTemplate() {
@@ -239,7 +254,7 @@ export default {
               nodeType: 'template',
               level: 1,
               pid: null,
-              dynamicData: ''
+              dynamicData: JSON.stringify(this.panelViewDetailsInfo)
             }
           }
         })
@@ -258,10 +273,10 @@ export default {
               snapshot: snapshot,
               panelStyle: JSON.stringify(this.canvasStyleData),
               panelData: JSON.stringify(this.componentData),
-              dynamicData: ''
+              dynamicData: JSON.stringify(this.panelViewDetailsInfo)
             }
             const blob = new Blob([JSON.stringify(this.templateInfo)], { type: '' })
-            FileSaver.saveAs(blob, this.$store.state.panel.panelInfo.name + '-TEMPLATE.DE')
+            FileSaver.saveAs(blob, this.$store.state.panel.panelInfo.name + '-TEMPLATE.DET')
           }
         })
       }, 50)
@@ -317,7 +332,7 @@ export default {
       })
     },
     initHasStar() {
-      starStatus(this.panelInfo.id).then(res => {
+      this.panelInfo && this.panelInfo.id && starStatus(this.panelInfo.id).then(res => {
         this.hasStar = res.data
       })
     },
@@ -334,8 +349,13 @@ export default {
     },
     editPanel() {
       this.$emit('editPanel')
+    },
+    refreshPanel() {
+      if (this.showType === 1 && this.shareUserId !== null) {
+        const param = { userId: this.shareUserId }
+        proxyInitPanelData(this.panelInfo.id, param, null)
+      } else { initPanelData(this.panelInfo.id) }
     }
-
   }
 }
 </script>
