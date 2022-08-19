@@ -9,6 +9,7 @@
         v-if="!!component"
         :params="param"
         :t-data="tData"
+        :ds-types="dsTypes"
         @refresh-type="refreshType"
         @switch-component="switchMain"
       />
@@ -21,7 +22,8 @@ import DeMainContainer from '@/components/dataease/DeMainContainer'
 import DeContainer from '@/components/dataease/DeContainer'
 import DeAsideContainer from '@/components/dataease/DeAsideContainer'
 import DsTree from './DsTree'
-import DsForm from './form'
+import DsForm from './DsForm'
+import DriverForm from "./DriverForm";
 import DataHome from './DataHome'
 
 export default {
@@ -32,7 +34,8 @@ export default {
       component: DataHome,
       datasource: {},
       param: null,
-      tData: null
+      tData: null,
+      dsTypes: []
     }
   },
   computed: {},
@@ -43,7 +46,7 @@ export default {
   methods: {
     // 切换main区内容
     switchMain(param) {
-      const { component, componentParam, tData } = param
+      const { component, componentParam, tData, dsTypes} = param
       this.component = DataHome
       this.param = null
       this.$nextTick(() => {
@@ -52,6 +55,13 @@ export default {
             this.component = DsForm
             this.param = componentParam
             this.tData = tData
+            this.dsTypes = dsTypes
+            break
+          case 'DriverForm':
+            this.component = DriverForm
+            this.param = componentParam
+            this.tData = tData
+            this.dsTypes = dsTypes
             break
           default:
             this.component = DataHome

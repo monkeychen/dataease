@@ -26,20 +26,16 @@
 </template>
 
 <script>
-// custom skin css
 import '@/custom-theme.css'
 import { mapState } from 'vuex'
 import bus from '@/utils/bus'
-// import SWF_URL from 'videojs-swf/dist/video-js.swf'
 
 export default {
   props: {
-    // eslint-disable-next-line vue/require-default-prop
     propValue: {
       type: String,
       require: true
     },
-    // eslint-disable-next-line vue/require-default-prop
     element: {
       type: Object
     },
@@ -94,56 +90,43 @@ export default {
     this.initOption()
   },
   mounted() {
-    bus.$on('videoLinksChange-' + this.element.id, () => {
+    bus.$on('videoLinksChange-' + this.element.id, this.videoLinksChange)
+  },
+  beforeDestroy() {
+    bus.$off('videoLinksChange-' + this.element.id, this.videoLinksChange)
+  },
+  methods: {
+    videoLinksChange() {
       this.showVideo = false
       this.$nextTick(() => {
         this.showVideo = true
         this.initOption()
       })
-    })
-  },
-  methods: {
+    },
     initOption() {
       this.pOption = this.element.videoLinks[this.element.videoLinks.videoType]
       this.pOption.height = this.h - (this.curGap * 2)
     },
     // listen event
     onPlayerPlay(player) {
-      // console.log('player play!', player)
     },
     onPlayerEnded(player) {
-      // console.log('player ended!', player)
     },
     onPlayerLoadeddata(player) {
-      // console.log('player Loadeddata!', player)
     },
     onPlayerWaiting(player) {
-      // console.log('player Waiting!', player)
     },
     onPlayerPlaying(player) {
-      // console.log('player Playing!', player)
     },
     onPlayerTimeupdate(player) {
-      // console.log('player Timeupdate!', player.currentTime())
     },
     onPlayerCanplay(player) {
-      // console.log('player Canplay!', player)
     },
     onPlayerCanplaythrough(player) {
-      // console.log('player Ca
-      // console.log('example 01nplaythrough!', player)
     },
-
-    // or listen state event
     playerStateChanged(playerCurrentState) {
-      // console.log('player current update state', playerCurrentState)
     },
-
-    // player is ready
     playerReadied(player) {
-      // seek to 10s
-      // console.log('example player 1 readied', player)
-      // player.currentTime(10): the player is readied', player)
     }
   }
 }
@@ -156,7 +139,7 @@ export default {
     display: flex;
     align-items: center;
     justify-content: center;
-    background-color: #FFFFFF;
+    background-color: rgba(255,255,255,0.3);
     font-size: 12px;
     color: #9ea6b2;
   }

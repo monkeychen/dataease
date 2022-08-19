@@ -2,21 +2,25 @@ package io.dataease.service.chart;
 
 import cn.hutool.core.util.ReflectUtil;
 import com.google.gson.Gson;
-import io.dataease.base.domain.DatasetTableField;
-import io.dataease.base.domain.Datasource;
-import io.dataease.controller.request.chart.ChartExtFilterRequest;
-import io.dataease.dto.chart.ChartFieldCustomFilterDTO;
-import io.dataease.dto.chart.ChartViewFieldDTO;
+import io.dataease.commons.model.PluginViewSetImpl;
+import io.dataease.commons.utils.TableUtils;
 import io.dataease.dto.dataset.DataSetTableUnionDTO;
 import io.dataease.dto.dataset.DataTableInfoDTO;
-import io.dataease.dto.sqlObj.SQLObj;
-import io.dataease.plugins.common.constants.SQLConstants;
+import io.dataease.plugins.common.base.domain.ChartViewWithBLOBs;
+import io.dataease.plugins.common.base.domain.DatasetTableField;
+import io.dataease.plugins.common.base.domain.Datasource;
+import io.dataease.plugins.common.constants.DatasetType;
+import io.dataease.plugins.common.constants.datasource.SQLConstants;
+import io.dataease.plugins.common.dto.chart.ChartFieldCustomFilterDTO;
+import io.dataease.plugins.common.dto.chart.ChartViewFieldDTO;
+import io.dataease.plugins.common.dto.sqlObj.SQLObj;
+import io.dataease.plugins.common.request.chart.ChartExtFilterRequest;
 import io.dataease.plugins.common.util.BeanUtils;
 import io.dataease.plugins.common.util.ConstantsUtil;
+import io.dataease.plugins.datasource.query.QueryProvider;
 import io.dataease.plugins.view.entity.*;
 import io.dataease.plugins.view.service.ViewPluginBaseService;
 import io.dataease.provider.ProviderFactory;
-import io.dataease.provider.QueryProvider;
 import io.dataease.service.dataset.DataSetTableService;
 import io.dataease.service.dataset.DataSetTableUnionService;
 import org.apache.commons.lang3.ObjectUtils;
@@ -28,7 +32,7 @@ import java.lang.reflect.Method;
 import java.util.*;
 import java.util.stream.Collectors;
 
-import static io.dataease.plugins.common.constants.SQLConstants.TABLE_ALIAS_PREFIX;
+import static io.dataease.plugins.common.constants.datasource.SQLConstants.TABLE_ALIAS_PREFIX;
 
 @Service
 public class ViewPluginBaseServiceImpl implements ViewPluginBaseService {
@@ -95,24 +99,23 @@ public class ViewPluginBaseServiceImpl implements ViewPluginBaseService {
         String tableName = null;
         DataTableInfoDTO dataTableInfoDTO = new Gson().fromJson(pluginViewSet.getInfo(), DataTableInfoDTO.class);
         if (ObjectUtils.isNotEmpty(pluginViewSet.getMode()) && 1 == pluginViewSet.getMode()) {
-
-            tableName = "ds_" + pluginViewSet.getTabelId().replaceAll("-", "_");
-
+            tableName = TableUtils.tableName(pluginViewSet.getTabelId());
         }else {
-            switch (pluginViewSet.getType()) {
-                case "db":
+            switch (DatasetType.getEnumObjByKey(pluginViewSet.getType())) {
+                case DB:
                     tableName = dataTableInfoDTO.getTable();
                     break;
-                case "sql":
-                    tableName = dataTableInfoDTO.getSql();
+                case SQL:
+                    tableName = dataSetTableService.handleVariableDefaultValue(dataTableInfoDTO.getSql(), null);
+                    tableName = "(" + tableName + ")";
                     break;
-                case "custom":
+                case CUSTOM:
                     List<DataSetTableUnionDTO> list = dataSetTableUnionService.listByTableId(dataTableInfoDTO.getList().get(0).getTableId());
                     Datasource ds = new Datasource();
                     ds.setType(pluginViewSet.getDsType());
                     tableName = dataSetTableService.getCustomSQLDatasource(dataTableInfoDTO, list, ds);
                     break;
-                case "union":
+                case UNION:
                     Datasource datasource = new Datasource();
                     datasource.setType(pluginViewSet.getDsType());
                     Map<String, Object> sqlMap = dataSetTableService.getUnionSQLDatasource(dataTableInfoDTO, datasource);
@@ -127,6 +130,12 @@ public class ViewPluginBaseServiceImpl implements ViewPluginBaseService {
         String tabelName = (tableName.startsWith("(") && tableName.endsWith(")")) ? tableName : String.format(keyword, tableName);
         String tabelAlias = String.format(TABLE_ALIAS_PREFIX, 0);
         PluginViewSQL tableObj = PluginViewSQL.builder().tableName(tabelName).tableAlias(tabelAlias).build();
+        QueryProvider queryProvider = ProviderFactory.getQueryProvider(pluginViewSet.getDsType());
+        SQLObj sqlObj = SQLObj.builder().tableName(tabelName).tableAlias(tabelAlias).build();
+        PluginViewSetImpl child = (PluginViewSetImpl)pluginViewSet;
+        queryProvider.setSchema(sqlObj, child.getDs());
+        tableObj.setTableName(sqlObj.getTableName());
+        tableObj.setTableAlias(sqlObj.getTableAlias());
         return tableObj;
     }
 
@@ -225,4 +234,17 @@ public class ViewPluginBaseServiceImpl implements ViewPluginBaseService {
         return null;
     }
 
+    @Override
+    public String sqlLimit(String dsType, String sql, PluginViewLimit pluginViewLimit) {
+        QueryProvider queryProvider = ProviderFactory.getQueryProvider(dsType);
+        String methodName = "sqlLimit";
+        ChartViewWithBLOBs chartView = new ChartViewWithBLOBs();
+        chartView.setResultMode(pluginViewLimit.getResultMode());
+        chartView.setResultCount(pluginViewLimit.getResultCount());
+        Object result;
+        if ((result = execProviderMethod(queryProvider, methodName, sql, chartView)) != null) {
+            return result.toString();
+        }
+        return sql;
+    }
 }

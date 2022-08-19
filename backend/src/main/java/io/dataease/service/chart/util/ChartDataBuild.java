@@ -1,8 +1,9 @@
 package io.dataease.service.chart.util;
 
-import io.dataease.base.domain.ChartViewWithBLOBs;
+import io.dataease.plugins.common.base.domain.ChartViewWithBLOBs;
 import io.dataease.commons.constants.ColumnPermissionConstants;
 import io.dataease.dto.chart.*;
+import io.dataease.plugins.common.dto.chart.ChartViewFieldDTO;
 import org.apache.commons.collections4.CollectionUtils;
 import org.apache.commons.lang3.ObjectUtils;
 import org.apache.commons.lang3.StringUtils;
@@ -126,6 +127,7 @@ public class ChartDataBuild {
                     }
                 }
                 axisChartDataDTO.setField(a.toString());
+                axisChartDataDTO.setName(a.toString());
                 axisChartDataDTO.setCategory(row[xAxis.size()]);
 
                 List<ChartDimensionDTO> dimensionList = new ArrayList<>();
@@ -176,6 +178,7 @@ public class ChartDataBuild {
                 for (int i = xAxis.size(); i < xAxis.size() + yAxis.size(); i++) {
                     AxisChartDataAntVDTO axisChartDataDTO = new AxisChartDataAntVDTO();
                     axisChartDataDTO.setField(a.toString());
+                    axisChartDataDTO.setName(a.toString());
 
                     List<ChartDimensionDTO> dimensionList = new ArrayList<>();
                     List<ChartQuotaDTO> quotaList = new ArrayList<>();
@@ -231,6 +234,7 @@ public class ChartDataBuild {
             for (int i = xAxis.size(); i < xAxis.size() + yAxis.size(); i++) {
                 AxisChartDataAntVDTO axisChartDataDTO = new AxisChartDataAntVDTO();
                 axisChartDataDTO.setField(a.toString());
+                axisChartDataDTO.setName(a.toString());
 
                 List<ChartDimensionDTO> dimensionList = new ArrayList<>();
                 List<ChartQuotaDTO> quotaList = new ArrayList<>();
@@ -858,9 +862,7 @@ public class ChartDataBuild {
 
     // 表格
     public static Map<String, Object> transTableNormal(List<ChartViewFieldDTO> xAxis, List<ChartViewFieldDTO> yAxis, ChartViewWithBLOBs view, List<String[]> data, List<ChartViewFieldDTO> extStack, List<String> desensitizationList) {
-        Map<String, Object> map = new TreeMap<>();
         List<ChartViewFieldDTO> fields = new ArrayList<>();
-        List<Map<String, Object>> tableRow = new ArrayList<>();
         if (ObjectUtils.isNotEmpty(xAxis)) {
             fields.addAll(xAxis);
         }
@@ -870,6 +872,23 @@ public class ChartDataBuild {
             }
         }
         fields.addAll(yAxis);
+        return transTableNormal(fields, view, data, desensitizationList);
+    }
+
+    // 表格
+    public static Map<String, Object> transTableNormal(Map<String, List<ChartViewFieldDTO>> fieldMap, ChartViewWithBLOBs view, List<String[]> data, List<String> desensitizationList) {
+        
+        List<ChartViewFieldDTO> fields = new ArrayList<>();
+        if (CollectionUtils.isNotEmpty(fieldMap.get("xAxis")))fields.addAll(fieldMap.get("xAxis"));
+        if (CollectionUtils.isNotEmpty(fieldMap.get("tooltipAxis")))fields.addAll(fieldMap.get("tooltipAxis"));
+        if (CollectionUtils.isNotEmpty(fieldMap.get("labelAxis")))fields.addAll(fieldMap.get("labelAxis"));
+        if (CollectionUtils.isNotEmpty(fieldMap.get("yAxis")))fields.addAll(fieldMap.get("yAxis"));
+        return transTableNormal(fields, view, data, desensitizationList);
+    }
+
+    private static Map<String, Object> transTableNormal(List<ChartViewFieldDTO> fields, ChartViewWithBLOBs view, List<String[]> data, List<String> desensitizationList) {
+        Map<String, Object> map = new TreeMap<>();
+        List<Map<String, Object>> tableRow = new ArrayList<>();
         data.forEach(ele -> {
             Map<String, Object> d = new HashMap<>();
             for (int i = 0; i < fields.size(); i++) {
@@ -877,12 +896,12 @@ public class ChartDataBuild {
                     d.put(fields.get(i).getDataeaseName(), ColumnPermissionConstants.Desensitization_desc);
                     continue;
                 }
-
+                if (i == ele.length) break;
                 ChartViewFieldDTO chartViewFieldDTO = fields.get(i);
-                if (chartViewFieldDTO.getDeType() == 0 || chartViewFieldDTO.getDeType() == 1) {
+                if (chartViewFieldDTO.getDeType() == 0 || chartViewFieldDTO.getDeType() == 1 || chartViewFieldDTO.getDeType() == 5) {
                     d.put(fields.get(i).getDataeaseName(), StringUtils.isEmpty(ele[i]) ? "" : ele[i]);
                 } else if (chartViewFieldDTO.getDeType() == 2 || chartViewFieldDTO.getDeType() == 3) {
-                    d.put(fields.get(i).getDataeaseName(), StringUtils.isEmpty(ele[i]) ? null : new BigDecimal(ele[i]).setScale(2, RoundingMode.HALF_UP));
+                    d.put(fields.get(i).getDataeaseName(), StringUtils.isEmpty(ele[i]) ? null : new BigDecimal(ele[i]).setScale(8, RoundingMode.HALF_UP));
                 }
             }
             tableRow.add(d);

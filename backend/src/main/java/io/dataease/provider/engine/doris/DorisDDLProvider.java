@@ -1,12 +1,10 @@
 package io.dataease.provider.engine.doris;
 
 import com.google.gson.Gson;
-import io.dataease.base.domain.DatasetTableField;
-import io.dataease.base.domain.Datasource;
+import io.dataease.plugins.common.base.domain.DatasetTableField;
+import io.dataease.plugins.common.base.domain.Datasource;
 import io.dataease.commons.utils.TableUtils;
 import io.dataease.dto.datasource.DorisConfiguration;
-import io.dataease.dto.datasource.JdbcConfiguration;
-import io.dataease.dto.datasource.MysqlConfiguration;
 import io.dataease.provider.DDLProviderImpl;
 import org.springframework.stereotype.Service;
 
@@ -64,11 +62,11 @@ public class DorisDDLProvider extends DDLProviderImpl {
             }
             switch (datasetTableField.getDeExtractType()) {
                 case 0:
-                    Column_Fields.append("varchar(length)".replace("length", String.valueOf(size))).append(",`");
+                    Column_Fields.append("STRING".replace("length", String.valueOf(size))).append(",`");
                     break;
                 case 1:
                     size  = size < 50? 50 : size;
-                    Column_Fields.append("varchar(length)".replace("length", String.valueOf(size))).append(",`");
+                    Column_Fields.append("STRING".replace("length", String.valueOf(size))).append(",`");
                     break;
                 case 2:
                     Column_Fields.append("bigint").append(",`");
@@ -80,7 +78,7 @@ public class DorisDDLProvider extends DDLProviderImpl {
                     Column_Fields.append("TINYINT(length)".replace("length", String.valueOf(size))).append(",`");
                     break;
                 default:
-                    Column_Fields.append("varchar(length)".replace("length", String.valueOf(size))).append(",`");
+                    Column_Fields.append("STRING".replace("length", String.valueOf(size))).append(",`");
                     break;
             }
         }

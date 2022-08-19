@@ -1,6 +1,11 @@
 <template>
   <div style="width: 100%;height: 100vh;background-color: #f7f8fa">
-    <Preview v-if="show" />
+    <Preview
+      v-if="show"
+      :component-data="componentData"
+      :canvas-style-data="canvasStyleData"
+      :panel-info="panelInfo"
+    />
   </div>
 </template>
 
@@ -12,6 +17,7 @@ import { getPanelAllLinkageInfo } from '@/api/panel/linkage'
 import { queryPanelJumpInfo, queryTargetPanelJumpInfo } from '@/api/panel/linkJump'
 import { panelInit } from '@/components/canvas/utils/utils'
 import { getOuterParamsInfo } from '@/api/panel/outerParams'
+import { mapState } from 'vuex'
 
 export default {
   name: 'LinkView',
@@ -28,8 +34,15 @@ export default {
   },
   data() {
     return {
-      show: false
+      show: false,
+      panelInfo: {}
     }
+  },
+  computed: {
+    ...mapState([
+      'canvasStyleData',
+      'componentData'
+    ])
   },
   created() {
     this.show = false
@@ -40,11 +53,17 @@ export default {
       loadResource(this.resourceId).then(res => {
         this.show = false
         let loadingCount = 0
-        this.$store.dispatch('panel/setPanelInfo', {
+        this.panelInfo = {
           id: res.data.id,
           name: res.data.name,
-          privileges: res.data.privileges
-        })
+          privileges: res.data.privileges,
+          status: res.data.status,
+          createBy: res.data.createBy,
+          createTime: res.data.createTime,
+          updateBy: res.data.updateBy,
+          updateTime: res.data.updateTime
+        }
+        this.$store.dispatch('panel/setPanelInfo', this.panelInfo)
 
         panelInit(JSON.parse(res.data.panelData), JSON.parse(res.data.panelStyle))
         // 设置浏览器title为当前仪表板名称
@@ -83,11 +102,10 @@ export default {
             }
 
             this.$message({
-              message: this.$t('panel.json_params_error'),
-              type: 'error',
-              showClose: true
+              message: this.$t('panel.outer_param_decode_error'),
+              type: 'error'
             })
-            console.log('outerParams Decode error：', e)
+            console.error('outerParams Decode error：', e)
           }
         }
 
@@ -111,7 +129,7 @@ export default {
             if (--loadingCount === 0) {
               this.show = true
             }
-            console.log('tempParam error：', e)
+            console.error('tempParam error：', e)
           }
         }
 

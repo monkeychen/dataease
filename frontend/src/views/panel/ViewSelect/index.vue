@@ -46,7 +46,7 @@
                 <svg-icon icon-class="panel" class="ds-icon-scene" />
               </span>
               <span v-else>
-                <svg-icon :icon-class="data.isPlugin && data.type && data.type !== 'buddle-map' ? ('/api/pluginCommon/staticInfo/' + data.modelInnerType + '/svg') : data.modelInnerType" style="width: 14px;height: 14px" />
+                <svg-icon :icon-class="data.isPlugin && data.modelInnerType && data.modelInnerType !== 'buddle-map' ? ('/api/pluginCommon/staticInfo/' + data.modelInnerType + '/svg') : data.modelInnerType" style="width: 14px;height: 14px" />
               </span>
               <span style="margin-left: 6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" :title="data.name">{{ data.name }}</span>
             </span>
@@ -75,6 +75,7 @@ import { mapState } from 'vuex'
 import { queryPanelViewTree } from '@/api/panel/panel'
 import { deleteCircle } from '@/api/chart/chart'
 import { pluginTypes } from '@/api/chart/chart'
+import { matrixBaseChange } from '@/components/canvas/utils/utils'
 
 export default {
   name: 'ViewSelect',
@@ -153,7 +154,6 @@ export default {
       eventBus.$emit('startMoveIn')
     },
     dragEnd() {
-      // console.log('dragEnd')
       this.$store.commit('clearDragComponentInfo')
     },
     // 判断节点能否被拖拽
@@ -201,7 +201,7 @@ export default {
       // 用户视图设置 复制一个模板
       componentList.forEach(componentTemp => {
         if (componentTemp.type === 'view') {
-          component = deepCopy(componentTemp)
+          component = matrixBaseChange(deepCopy(componentTemp))
         }
       })
       component.auxiliaryMatrix = this.canvasStyleData.auxiliaryMatrix

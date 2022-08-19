@@ -1,18 +1,23 @@
 package io.dataease.provider.engine.doris;
 
-import io.dataease.base.domain.ChartViewWithBLOBs;
-import io.dataease.base.domain.DatasetTableField;
-import io.dataease.base.domain.DatasetTableFieldExample;
-import io.dataease.base.domain.Datasource;
-import io.dataease.base.mapper.DatasetTableFieldMapper;
-import io.dataease.controller.request.chart.ChartExtFilterRequest;
-import io.dataease.dto.chart.ChartCustomFilterItemDTO;
-import io.dataease.dto.chart.ChartFieldCustomFilterDTO;
-import io.dataease.dto.chart.ChartViewFieldDTO;
-import io.dataease.dto.sqlObj.SQLObj;
-import io.dataease.plugins.common.constants.DorisConstants;
-import io.dataease.provider.QueryProvider;
-import io.dataease.plugins.common.constants.SQLConstants;
+import io.dataease.plugins.common.base.domain.ChartViewWithBLOBs;
+import io.dataease.plugins.common.base.domain.DatasetTableField;
+import io.dataease.plugins.common.base.domain.DatasetTableFieldExample;
+import io.dataease.plugins.common.base.domain.Datasource;
+import io.dataease.plugins.common.base.mapper.DatasetTableFieldMapper;
+import io.dataease.plugins.common.constants.DeTypeConstants;
+import io.dataease.plugins.common.constants.datasource.DorisConstants;
+import io.dataease.plugins.common.constants.datasource.SQLConstants;
+import io.dataease.plugins.common.dto.chart.ChartCustomFilterItemDTO;
+import io.dataease.plugins.common.dto.chart.ChartFieldCustomFilterDTO;
+import io.dataease.plugins.common.dto.chart.ChartViewFieldDTO;
+import io.dataease.plugins.common.dto.datasource.DeSortField;
+import io.dataease.plugins.common.dto.sqlObj.SQLObj;
+import io.dataease.plugins.common.request.chart.ChartExtFilterRequest;
+import io.dataease.plugins.common.request.permission.DataSetRowPermissionsTreeDTO;
+import io.dataease.plugins.common.request.permission.DatasetRowPermissionsTreeItem;
+import io.dataease.plugins.datasource.query.QueryProvider;
+import io.dataease.plugins.datasource.query.Utils;
 import org.apache.commons.collections4.CollectionUtils;
 import org.apache.commons.lang3.ObjectUtils;
 import org.apache.commons.lang3.StringUtils;
@@ -29,13 +34,13 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
-import static io.dataease.plugins.common.constants.SQLConstants.TABLE_ALIAS_PREFIX;
+import static io.dataease.plugins.common.constants.datasource.SQLConstants.TABLE_ALIAS_PREFIX;
 
 /**
  * @Author gin
  * @Date 2021/5/17 4:11 下午
  */
-@Service("dorisEngineQuery")
+@Service("engine_dorisQueryProvider")
 public class DorisQueryProvider extends QueryProvider {
     @Resource
     private DatasetTableFieldMapper datasetTableFieldMapper;
@@ -81,7 +86,12 @@ public class DorisQueryProvider extends QueryProvider {
     }
 
     @Override
-    public String createQuerySQL(String table, List<DatasetTableField> fields, boolean isGroup, Datasource ds, List<ChartFieldCustomFilterDTO> fieldCustomFilter) {
+    public String createQuerySQL(String table, List<DatasetTableField> fields, boolean isGroup, Datasource ds, List<ChartFieldCustomFilterDTO> fieldCustomFilter, List<DataSetRowPermissionsTreeDTO> rowPermissionsTree) {
+        return createQuerySQL(table, fields, isGroup, ds, fieldCustomFilter, rowPermissionsTree, null);
+    }
+
+    @Override
+    public String createQuerySQL(String table, List<DatasetTableField> fields, boolean isGroup, Datasource ds, List<ChartFieldCustomFilterDTO> fieldCustomFilter, List<DataSetRowPermissionsTreeDTO> rowPermissionsTree, List<DeSortField> sortFields) {
         SQLObj tableObj = SQLObj.builder()
                 .tableName((table.startsWith("(") && table.endsWith(")")) ? table : String.format(DorisConstants.KEYWORD_TABLE, table))
                 .tableAlias(String.format(TABLE_ALIAS_PREFIX, 0))
@@ -144,40 +154,105 @@ public class DorisQueryProvider extends QueryProvider {
         if (CollectionUtils.isNotEmpty(xFields)) st_sql.add("groups", xFields);
         if (ObjectUtils.isNotEmpty(tableObj)) st_sql.add("table", tableObj);
         String customWheres = transCustomFilterList(tableObj, fieldCustomFilter);
+        // row permissions tree
+        String whereTrees = transFilterTrees(tableObj, rowPermissionsTree);
         List<String> wheres = new ArrayList<>();
         if (customWheres != null) wheres.add(customWheres);
+        if (whereTrees != null) wheres.add(whereTrees);
         if (CollectionUtils.isNotEmpty(wheres)) st_sql.add("filters", wheres);
+
+        if (CollectionUtils.isNotEmpty(sortFields)) {
+            int step = fields.size();
+            for (int i = step; i < (step + sortFields.size()); i++) {
+                DeSortField deSortField = sortFields.get(i - step);
+                SQLObj order = buildSortField(deSortField, tableObj, i);
+                xOrders.add(order);
+            }
+        }
+        if (ObjectUtils.isNotEmpty(xOrders)) {
+            st_sql.add("orders", xOrders);
+        }
 
         return st_sql.render();
     }
 
-    @Override
-    public String createQuerySQLAsTmp(String sql, List<DatasetTableField> fields, boolean isGroup, List<ChartFieldCustomFilterDTO> fieldCustomFilter) {
-        return createQuerySQL("(" + sql + ")", fields, isGroup, null, fieldCustomFilter);
+    private SQLObj buildSortField(DeSortField f, SQLObj tableObj, int i) {
+        String originField;
+        if (ObjectUtils.isNotEmpty(f.getExtField()) && f.getExtField() == 2) {
+            // 解析origin name中有关联的字段生成sql表达式
+            originField = calcFieldRegex(f.getOriginName(), tableObj);
+        } else if (ObjectUtils.isNotEmpty(f.getExtField()) && f.getExtField() == 1) {
+            originField = String.format(DorisConstants.KEYWORD_FIX, tableObj.getTableAlias(), f.getDataeaseName());
+        } else {
+            originField = String.format(DorisConstants.KEYWORD_FIX, tableObj.getTableAlias(), f.getDataeaseName());
+        }
+        String fieldAlias = String.format(SQLConstants.FIELD_ALIAS_X_PREFIX, i);
+        String fieldName = "";
+        // 处理横轴字段
+        if (f.getDeExtractType() == 1) {
+            if (f.getDeType() == 2 || f.getDeType() == 3) {
+                fieldName = String.format(DorisConstants.UNIX_TIMESTAMP, originField) + "*1000";
+            } else {
+                fieldName = originField;
+            }
+        } else if (f.getDeExtractType() == 0) {
+            if (f.getDeType() == 2) {
+                fieldName = String.format(DorisConstants.CAST, originField, DorisConstants.DEFAULT_INT_FORMAT);
+            } else if (f.getDeType() == 3) {
+                fieldName = String.format(DorisConstants.CAST, originField, DorisConstants.DEFAULT_FLOAT_FORMAT);
+            } else if (f.getDeType() == 1) {
+                fieldName = String.format(DorisConstants.STR_TO_DATE, originField, DorisConstants.DEFAULT_DATE_FORMAT);
+            } else {
+                fieldName = originField;
+            }
+        } else {
+            if (f.getDeType() == 1) {
+                String cast = String.format(DorisConstants.CAST, originField, DorisConstants.DEFAULT_INT_FORMAT) + "/1000";
+                fieldName = String.format(DorisConstants.FROM_UNIXTIME, cast, DorisConstants.DEFAULT_DATE_FORMAT);
+            } else if (f.getDeType() == 2) {
+                fieldName = String.format(DorisConstants.CAST, originField, DorisConstants.DEFAULT_INT_FORMAT);
+            } else if (f.getDeType() == 3) {
+                fieldName = String.format(DorisConstants.CAST, originField, DorisConstants.DEFAULT_FLOAT_FORMAT);
+            } else {
+                fieldName = originField;
+            }
+        }
+        SQLObj result = SQLObj.builder().orderField(originField).orderAlias(originField).orderDirection(f.getOrderDirection()).build();
+        return result;
     }
 
     @Override
-    public String createQueryTableWithPage(String table, List<DatasetTableField> fields, Integer page, Integer pageSize, Integer realSize, boolean isGroup, Datasource ds, List<ChartFieldCustomFilterDTO> fieldCustomFilter) {
-        return createQuerySQL(table, fields, isGroup, null, fieldCustomFilter) + " LIMIT " + (page - 1) * pageSize + "," + realSize;
+    public String createQuerySQLAsTmp(String sql, List<DatasetTableField> fields, boolean isGroup, List<ChartFieldCustomFilterDTO> fieldCustomFilter, List<DataSetRowPermissionsTreeDTO> rowPermissionsTree, List<DeSortField> sortFields) {
+        return createQuerySQL("(" + sql + ")", fields, isGroup, null, fieldCustomFilter, rowPermissionsTree, sortFields);
     }
 
     @Override
-    public String createQueryTableWithLimit(String table, List<DatasetTableField> fields, Integer limit, boolean isGroup, Datasource ds, List<ChartFieldCustomFilterDTO> fieldCustomFilter) {
-        return createQuerySQL(table, fields, isGroup, null, fieldCustomFilter) + " LIMIT 0," + limit;
+    public String createQuerySQLAsTmp(String sql, List<DatasetTableField> fields, boolean isGroup, List<ChartFieldCustomFilterDTO> fieldCustomFilter, List<DataSetRowPermissionsTreeDTO> rowPermissionsTree) {
+        return createQuerySQL("(" + sql + ")", fields, isGroup, null, fieldCustomFilter, rowPermissionsTree);
     }
 
     @Override
-    public String createQuerySqlWithLimit(String sql, List<DatasetTableField> fields, Integer limit, boolean isGroup, List<ChartFieldCustomFilterDTO> fieldCustomFilter) {
-        return createQuerySQLAsTmp(sql, fields, isGroup, fieldCustomFilter) + " LIMIT 0," + limit;
+    public String createQueryTableWithPage(String table, List<DatasetTableField> fields, Integer page, Integer pageSize, Integer realSize, boolean isGroup, Datasource ds, List<ChartFieldCustomFilterDTO> fieldCustomFilter, List<DataSetRowPermissionsTreeDTO> rowPermissionsTree) {
+        return createQuerySQL(table, fields, isGroup, null, fieldCustomFilter, rowPermissionsTree) + " LIMIT " + (page - 1) * pageSize + "," + realSize;
     }
 
     @Override
-    public String createQuerySQLWithPage(String sql, List<DatasetTableField> fields, Integer page, Integer pageSize, Integer realSize, boolean isGroup, List<ChartFieldCustomFilterDTO> fieldCustomFilter) {
-        return createQuerySQLAsTmp(sql, fields, isGroup, fieldCustomFilter) + " LIMIT " + (page - 1) * pageSize + "," + realSize;
+    public String createQueryTableWithLimit(String table, List<DatasetTableField> fields, Integer limit, boolean isGroup, Datasource ds, List<ChartFieldCustomFilterDTO> fieldCustomFilter, List<DataSetRowPermissionsTreeDTO> rowPermissionsTree) {
+        return createQuerySQL(table, fields, isGroup, null, fieldCustomFilter, rowPermissionsTree) + " LIMIT 0," + limit;
     }
 
     @Override
-    public String getSQL(String table, List<ChartViewFieldDTO> xAxis, List<ChartViewFieldDTO> yAxis, List<ChartFieldCustomFilterDTO> fieldCustomFilter, List<ChartExtFilterRequest> extFilterRequestList, Datasource ds, ChartViewWithBLOBs view) {
+    public String createQuerySqlWithLimit(String sql, List<DatasetTableField> fields, Integer limit, boolean isGroup, List<ChartFieldCustomFilterDTO> fieldCustomFilter, List<DataSetRowPermissionsTreeDTO> rowPermissionsTree) {
+        return createQuerySQLAsTmp(sql, fields, isGroup, fieldCustomFilter, rowPermissionsTree) + " LIMIT 0," + limit;
+    }
+
+    @Override
+    public String createQuerySQLWithPage(String sql, List<DatasetTableField> fields, Integer page, Integer pageSize, Integer realSize, boolean isGroup, List<ChartFieldCustomFilterDTO> fieldCustomFilter, List<DataSetRowPermissionsTreeDTO> rowPermissionsTree) {
+        return createQuerySQLAsTmp(sql, fields, isGroup, fieldCustomFilter, rowPermissionsTree) + " LIMIT " + (page - 1) * pageSize + "," + realSize;
+    }
+
+    @Override
+    public String getSQL(String table, List<ChartViewFieldDTO> xAxis, List<ChartViewFieldDTO> yAxis, List<ChartFieldCustomFilterDTO> fieldCustomFilter, List<DataSetRowPermissionsTreeDTO> rowPermissionsTree, List<ChartExtFilterRequest> extFilterRequestList, Datasource ds, ChartViewWithBLOBs view) {
         SQLObj tableObj = SQLObj.builder()
                 .tableName((table.startsWith("(") && table.endsWith(")")) ? table : String.format(DorisConstants.KEYWORD_TABLE, table))
                 .tableAlias(String.format(TABLE_ALIAS_PREFIX, 0))
@@ -201,7 +276,7 @@ public class DorisQueryProvider extends QueryProvider {
                 xFields.add(getXFields(x, originField, fieldAlias));
 
                 // 处理横轴排序
-                if (StringUtils.isNotEmpty(x.getSort()) && !StringUtils.equalsIgnoreCase(x.getSort(), "none")) {
+                if (StringUtils.isNotEmpty(x.getSort()) && Utils.joinSort(x.getSort())) {
                     xOrders.add(SQLObj.builder()
                             .orderField(originField)
                             .orderAlias(fieldAlias)
@@ -231,7 +306,7 @@ public class DorisQueryProvider extends QueryProvider {
                 // 处理纵轴过滤
                 yWheres.add(getYWheres(y, originField, fieldAlias));
                 // 处理纵轴排序
-                if (StringUtils.isNotEmpty(y.getSort()) && !StringUtils.equalsIgnoreCase(y.getSort(), "none")) {
+                if (StringUtils.isNotEmpty(y.getSort()) && Utils.joinSort(y.getSort())) {
                     yOrders.add(SQLObj.builder()
                             .orderField(originField)
                             .orderAlias(fieldAlias)
@@ -244,6 +319,8 @@ public class DorisQueryProvider extends QueryProvider {
         String customWheres = transCustomFilterList(tableObj, fieldCustomFilter);
         // 处理仪表板字段过滤
         String extWheres = transExtFilterList(tableObj, extFilterRequestList);
+        // row permissions tree
+        String whereTrees = transFilterTrees(tableObj, rowPermissionsTree);
         // 构建sql所有参数
         List<SQLObj> fields = new ArrayList<>();
         fields.addAll(xFields);
@@ -251,6 +328,7 @@ public class DorisQueryProvider extends QueryProvider {
         List<String> wheres = new ArrayList<>();
         if (customWheres != null) wheres.add(customWheres);
         if (extWheres != null) wheres.add(extWheres);
+        if (whereTrees != null) wheres.add(whereTrees);
         List<SQLObj> groups = new ArrayList<>();
         groups.addAll(xFields);
         // 外层再次套sql
@@ -280,7 +358,7 @@ public class DorisQueryProvider extends QueryProvider {
     }
 
     @Override
-    public String getSQLTableInfo(String table, List<ChartViewFieldDTO> xAxis, List<ChartFieldCustomFilterDTO> fieldCustomFilter, List<ChartExtFilterRequest> extFilterRequestList, Datasource ds, ChartViewWithBLOBs view) {
+    public String getSQLTableInfo(String table, List<ChartViewFieldDTO> xAxis, List<ChartFieldCustomFilterDTO> fieldCustomFilter, List<DataSetRowPermissionsTreeDTO> rowPermissionsTree, List<ChartExtFilterRequest> extFilterRequestList, Datasource ds, ChartViewWithBLOBs view) {
         SQLObj tableObj = SQLObj.builder()
                 .tableName((table.startsWith("(") && table.endsWith(")")) ? table : String.format(DorisConstants.KEYWORD_TABLE, table))
                 .tableAlias(String.format(TABLE_ALIAS_PREFIX, 0))
@@ -308,7 +386,7 @@ public class DorisQueryProvider extends QueryProvider {
                 xFields.add(getXFields(x, originField, fieldAlias));
 
                 // 处理横轴排序
-                if (StringUtils.isNotEmpty(x.getSort()) && !StringUtils.equalsIgnoreCase(x.getSort(), "none")) {
+                if (StringUtils.isNotEmpty(x.getSort()) && Utils.joinSort(x.getSort())) {
                     xOrders.add(SQLObj.builder()
                             .orderField(originField)
                             .orderAlias(fieldAlias)
@@ -321,12 +399,15 @@ public class DorisQueryProvider extends QueryProvider {
         String customWheres = transCustomFilterList(tableObj, fieldCustomFilter);
         // 处理仪表板字段过滤
         String extWheres = transExtFilterList(tableObj, extFilterRequestList);
+        // row permissions tree
+        String whereTrees = transFilterTrees(tableObj, rowPermissionsTree);
         // 构建sql所有参数
         List<SQLObj> fields = new ArrayList<>();
         fields.addAll(xFields);
         List<String> wheres = new ArrayList<>();
         if (customWheres != null) wheres.add(customWheres);
         if (extWheres != null) wheres.add(extWheres);
+        if (whereTrees != null) wheres.add(whereTrees);
         List<SQLObj> groups = new ArrayList<>();
         groups.addAll(xFields);
         // 外层再次套sql
@@ -353,17 +434,17 @@ public class DorisQueryProvider extends QueryProvider {
     }
 
     @Override
-    public String getSQLAsTmpTableInfo(String sql, List<ChartViewFieldDTO> xAxis, List<ChartFieldCustomFilterDTO> fieldCustomFilter, List<ChartExtFilterRequest> extFilterRequestList, Datasource ds, ChartViewWithBLOBs view) {
-        return getSQLTableInfo("(" + sqlFix(sql) + ")", xAxis, fieldCustomFilter, extFilterRequestList, null, view);
+    public String getSQLAsTmpTableInfo(String sql, List<ChartViewFieldDTO> xAxis, List<ChartFieldCustomFilterDTO> fieldCustomFilter, List<DataSetRowPermissionsTreeDTO> rowPermissionsTree, List<ChartExtFilterRequest> extFilterRequestList, Datasource ds, ChartViewWithBLOBs view) {
+        return getSQLTableInfo("(" + sqlFix(sql) + ")", xAxis, fieldCustomFilter, rowPermissionsTree, extFilterRequestList, null, view);
     }
 
     @Override
-    public String getSQLAsTmp(String sql, List<ChartViewFieldDTO> xAxis, List<ChartViewFieldDTO> yAxis, List<ChartFieldCustomFilterDTO> fieldCustomFilter, List<ChartExtFilterRequest> extFilterRequestList, ChartViewWithBLOBs view) {
-        return getSQL("(" + sql + ")", xAxis, yAxis, fieldCustomFilter, extFilterRequestList, null, view);
+    public String getSQLAsTmp(String sql, List<ChartViewFieldDTO> xAxis, List<ChartViewFieldDTO> yAxis, List<ChartFieldCustomFilterDTO> fieldCustomFilter, List<DataSetRowPermissionsTreeDTO> rowPermissionsTree, List<ChartExtFilterRequest> extFilterRequestList, ChartViewWithBLOBs view) {
+        return getSQL("(" + sql + ")", xAxis, yAxis, fieldCustomFilter, rowPermissionsTree, extFilterRequestList, null, view);
     }
 
     @Override
-    public String getSQLStack(String table, List<ChartViewFieldDTO> xAxis, List<ChartViewFieldDTO> yAxis, List<ChartFieldCustomFilterDTO> fieldCustomFilter, List<ChartExtFilterRequest> extFilterRequestList, List<ChartViewFieldDTO> extStack, Datasource ds, ChartViewWithBLOBs view) {
+    public String getSQLStack(String table, List<ChartViewFieldDTO> xAxis, List<ChartViewFieldDTO> yAxis, List<ChartFieldCustomFilterDTO> fieldCustomFilter, List<DataSetRowPermissionsTreeDTO> rowPermissionsTree, List<ChartExtFilterRequest> extFilterRequestList, List<ChartViewFieldDTO> extStack, Datasource ds, ChartViewWithBLOBs view) {
         SQLObj tableObj = SQLObj.builder()
                 .tableName((table.startsWith("(") && table.endsWith(")")) ? table : String.format(DorisConstants.KEYWORD_TABLE, table))
                 .tableAlias(String.format(TABLE_ALIAS_PREFIX, 0))
@@ -390,7 +471,7 @@ public class DorisQueryProvider extends QueryProvider {
                 xFields.add(getXFields(x, originField, fieldAlias));
 
                 // 处理横轴排序
-                if (StringUtils.isNotEmpty(x.getSort()) && !StringUtils.equalsIgnoreCase(x.getSort(), "none")) {
+                if (StringUtils.isNotEmpty(x.getSort()) && Utils.joinSort(x.getSort())) {
                     xOrders.add(SQLObj.builder()
                             .orderField(originField)
                             .orderAlias(fieldAlias)
@@ -420,7 +501,7 @@ public class DorisQueryProvider extends QueryProvider {
                 // 处理纵轴过滤
                 yWheres.add(getYWheres(y, originField, fieldAlias));
                 // 处理纵轴排序
-                if (StringUtils.isNotEmpty(y.getSort()) && !StringUtils.equalsIgnoreCase(y.getSort(), "none")) {
+                if (StringUtils.isNotEmpty(y.getSort()) && Utils.joinSort(y.getSort())) {
                     yOrders.add(SQLObj.builder()
                             .orderField(originField)
                             .orderAlias(fieldAlias)
@@ -433,6 +514,8 @@ public class DorisQueryProvider extends QueryProvider {
         String customWheres = transCustomFilterList(tableObj, fieldCustomFilter);
         // 处理仪表板字段过滤
         String extWheres = transExtFilterList(tableObj, extFilterRequestList);
+        // row permissions tree
+        String whereTrees = transFilterTrees(tableObj, rowPermissionsTree);
         // 构建sql所有参数
         List<SQLObj> fields = new ArrayList<>();
         fields.addAll(xFields);
@@ -440,6 +523,7 @@ public class DorisQueryProvider extends QueryProvider {
         List<String> wheres = new ArrayList<>();
         if (customWheres != null) wheres.add(customWheres);
         if (extWheres != null) wheres.add(extWheres);
+        if (whereTrees != null) wheres.add(whereTrees);
         List<SQLObj> groups = new ArrayList<>();
         groups.addAll(xFields);
         // 外层再次套sql
@@ -469,12 +553,12 @@ public class DorisQueryProvider extends QueryProvider {
     }
 
     @Override
-    public String getSQLAsTmpStack(String table, List<ChartViewFieldDTO> xAxis, List<ChartViewFieldDTO> yAxis, List<ChartFieldCustomFilterDTO> fieldCustomFilter, List<ChartExtFilterRequest> extFilterRequestList, List<ChartViewFieldDTO> extStack, ChartViewWithBLOBs view) {
-        return getSQLStack("(" + table + ")", xAxis, yAxis, fieldCustomFilter, extFilterRequestList, extStack, null, view);
+    public String getSQLAsTmpStack(String table, List<ChartViewFieldDTO> xAxis, List<ChartViewFieldDTO> yAxis, List<ChartFieldCustomFilterDTO> fieldCustomFilter, List<DataSetRowPermissionsTreeDTO> rowPermissionsTree, List<ChartExtFilterRequest> extFilterRequestList, List<ChartViewFieldDTO> extStack, ChartViewWithBLOBs view) {
+        return getSQLStack("(" + table + ")", xAxis, yAxis, fieldCustomFilter, rowPermissionsTree, extFilterRequestList, extStack, null, view);
     }
 
     @Override
-    public String getSQLScatter(String table, List<ChartViewFieldDTO> xAxis, List<ChartViewFieldDTO> yAxis, List<ChartFieldCustomFilterDTO> fieldCustomFilter, List<ChartExtFilterRequest> extFilterRequestList, List<ChartViewFieldDTO> extBubble, Datasource ds, ChartViewWithBLOBs view) {
+    public String getSQLScatter(String table, List<ChartViewFieldDTO> xAxis, List<ChartViewFieldDTO> yAxis, List<ChartFieldCustomFilterDTO> fieldCustomFilter, List<DataSetRowPermissionsTreeDTO> rowPermissionsTree, List<ChartExtFilterRequest> extFilterRequestList, List<ChartViewFieldDTO> extBubble, Datasource ds, ChartViewWithBLOBs view) {
         SQLObj tableObj = SQLObj.builder()
                 .tableName((table.startsWith("(") && table.endsWith(")")) ? table : String.format(DorisConstants.KEYWORD_TABLE, table))
                 .tableAlias(String.format(TABLE_ALIAS_PREFIX, 0))
@@ -498,7 +582,7 @@ public class DorisQueryProvider extends QueryProvider {
                 xFields.add(getXFields(x, originField, fieldAlias));
 
                 // 处理横轴排序
-                if (StringUtils.isNotEmpty(x.getSort()) && !StringUtils.equalsIgnoreCase(x.getSort(), "none")) {
+                if (StringUtils.isNotEmpty(x.getSort()) && Utils.joinSort(x.getSort())) {
                     xOrders.add(SQLObj.builder()
                             .orderField(originField)
                             .orderAlias(fieldAlias)
@@ -531,7 +615,7 @@ public class DorisQueryProvider extends QueryProvider {
                 // 处理纵轴过滤
                 yWheres.add(getYWheres(y, originField, fieldAlias));
                 // 处理纵轴排序
-                if (StringUtils.isNotEmpty(y.getSort()) && !StringUtils.equalsIgnoreCase(y.getSort(), "none")) {
+                if (StringUtils.isNotEmpty(y.getSort()) && Utils.joinSort(y.getSort())) {
                     yOrders.add(SQLObj.builder()
                             .orderField(originField)
                             .orderAlias(fieldAlias)
@@ -544,6 +628,8 @@ public class DorisQueryProvider extends QueryProvider {
         String customWheres = transCustomFilterList(tableObj, fieldCustomFilter);
         // 处理仪表板字段过滤
         String extWheres = transExtFilterList(tableObj, extFilterRequestList);
+        // row permissions tree
+        String whereTrees = transFilterTrees(tableObj, rowPermissionsTree);
         // 构建sql所有参数
         List<SQLObj> fields = new ArrayList<>();
         fields.addAll(xFields);
@@ -551,6 +637,7 @@ public class DorisQueryProvider extends QueryProvider {
         List<String> wheres = new ArrayList<>();
         if (customWheres != null) wheres.add(customWheres);
         if (extWheres != null) wheres.add(extWheres);
+        if (whereTrees != null) wheres.add(whereTrees);
         List<SQLObj> groups = new ArrayList<>();
         groups.addAll(xFields);
         // 外层再次套sql
@@ -580,8 +667,8 @@ public class DorisQueryProvider extends QueryProvider {
     }
 
     @Override
-    public String getSQLAsTmpScatter(String table, List<ChartViewFieldDTO> xAxis, List<ChartViewFieldDTO> yAxis, List<ChartFieldCustomFilterDTO> fieldCustomFilter, List<ChartExtFilterRequest> extFilterRequestList, List<ChartViewFieldDTO> extBubble, ChartViewWithBLOBs view) {
-        return getSQLScatter("(" + table + ")", xAxis, yAxis, fieldCustomFilter, extFilterRequestList, extBubble, null, view);
+    public String getSQLAsTmpScatter(String table, List<ChartViewFieldDTO> xAxis, List<ChartViewFieldDTO> yAxis, List<ChartFieldCustomFilterDTO> fieldCustomFilter, List<DataSetRowPermissionsTreeDTO> rowPermissionsTree, List<ChartExtFilterRequest> extFilterRequestList, List<ChartViewFieldDTO> extBubble, ChartViewWithBLOBs view) {
+        return getSQLScatter("(" + table + ")", xAxis, yAxis, fieldCustomFilter, rowPermissionsTree, extFilterRequestList, extBubble, null, view);
     }
 
     @Override
@@ -590,7 +677,7 @@ public class DorisQueryProvider extends QueryProvider {
     }
 
     @Override
-    public String getSQLSummary(String table, List<ChartViewFieldDTO> yAxis, List<ChartFieldCustomFilterDTO> fieldCustomFilter, List<ChartExtFilterRequest> extFilterRequestList, ChartViewWithBLOBs view, Datasource ds) {
+    public String getSQLSummary(String table, List<ChartViewFieldDTO> yAxis, List<ChartFieldCustomFilterDTO> fieldCustomFilter, List<DataSetRowPermissionsTreeDTO> rowPermissionsTree, List<ChartExtFilterRequest> extFilterRequestList, ChartViewWithBLOBs view, Datasource ds) {
         // 字段汇总 排序等
         SQLObj tableObj = SQLObj.builder()
                 .tableName((table.startsWith("(") && table.endsWith(")")) ? table : String.format(DorisConstants.KEYWORD_TABLE, table))
@@ -617,7 +704,7 @@ public class DorisQueryProvider extends QueryProvider {
                 // 处理纵轴过滤
                 yWheres.add(getYWheres(y, originField, fieldAlias));
                 // 处理纵轴排序
-                if (StringUtils.isNotEmpty(y.getSort()) && !StringUtils.equalsIgnoreCase(y.getSort(), "none")) {
+                if (StringUtils.isNotEmpty(y.getSort()) && Utils.joinSort(y.getSort())) {
                     yOrders.add(SQLObj.builder()
                             .orderField(originField)
                             .orderAlias(fieldAlias)
@@ -630,12 +717,15 @@ public class DorisQueryProvider extends QueryProvider {
         String customWheres = transCustomFilterList(tableObj, fieldCustomFilter);
         // 处理仪表板字段过滤
         String extWheres = transExtFilterList(tableObj, extFilterRequestList);
+        // row permissions tree
+        String whereTrees = transFilterTrees(tableObj, rowPermissionsTree);
         // 构建sql所有参数
         List<SQLObj> fields = new ArrayList<>();
         fields.addAll(yFields);
         List<String> wheres = new ArrayList<>();
         if (customWheres != null) wheres.add(customWheres);
         if (extWheres != null) wheres.add(extWheres);
+        if (whereTrees != null) wheres.add(whereTrees);
         List<SQLObj> groups = new ArrayList<>();
         // 外层再次套sql
         List<SQLObj> orders = new ArrayList<>();
@@ -662,8 +752,8 @@ public class DorisQueryProvider extends QueryProvider {
     }
 
     @Override
-    public String getSQLSummaryAsTmp(String sql, List<ChartViewFieldDTO> yAxis, List<ChartFieldCustomFilterDTO> fieldCustomFilter, List<ChartExtFilterRequest> extFilterRequestList, ChartViewWithBLOBs view) {
-        return getSQLSummary("(" + sql + ")", yAxis, fieldCustomFilter, extFilterRequestList, view, null);
+    public String getSQLSummaryAsTmp(String sql, List<ChartViewFieldDTO> yAxis, List<ChartFieldCustomFilterDTO> fieldCustomFilter, List<DataSetRowPermissionsTreeDTO> rowPermissionsTree, List<ChartExtFilterRequest> extFilterRequestList, ChartViewWithBLOBs view) {
+        return getSQLSummary("(" + sql + ")", yAxis, fieldCustomFilter, rowPermissionsTree, extFilterRequestList, view, null);
     }
 
     @Override
@@ -689,6 +779,81 @@ public class DorisQueryProvider extends QueryProvider {
     @Override
     public String createRawQuerySQLAsTmp(String sql, List<DatasetTableField> fields) {
         return createRawQuerySQL(" (" + sqlFix(sql) + ") AS tmp ", fields, null);
+    }
+
+    @Override
+    public String transTreeItem(SQLObj tableObj, DatasetRowPermissionsTreeItem item) {
+        String res = null;
+        DatasetTableField field = item.getField();
+        if (ObjectUtils.isEmpty(field)) {
+            return null;
+        }
+        String whereName = "";
+        String originName;
+        if (ObjectUtils.isNotEmpty(field.getExtField()) && field.getExtField() == 2) {
+            // 解析origin name中有关联的字段生成sql表达式
+            originName = calcFieldRegex(field.getOriginName(), tableObj);
+        } else if (ObjectUtils.isNotEmpty(field.getExtField()) && field.getExtField() == 1) {
+            originName = String.format(DorisConstants.KEYWORD_FIX, tableObj.getTableAlias(), field.getDataeaseName());
+        } else {
+            originName = String.format(DorisConstants.KEYWORD_FIX, tableObj.getTableAlias(), field.getDataeaseName());
+        }
+
+        if (field.getDeType() == 1) {
+            if (field.getDeExtractType() == 0 || field.getDeExtractType() == 5 || field.getDeExtractType() == 1) {
+                whereName = String.format(DorisConstants.STR_TO_DATE, originName, DorisConstants.DEFAULT_DATE_FORMAT);
+            }
+            if (field.getDeExtractType() == 2 || field.getDeExtractType() == 3 || field.getDeExtractType() == 4) {
+                String cast = String.format(DorisConstants.CAST, originName, DorisConstants.DEFAULT_INT_FORMAT) + "/1000";
+                whereName = String.format(DorisConstants.FROM_UNIXTIME, cast, DorisConstants.DEFAULT_DATE_FORMAT);
+            }
+        } else if (field.getDeType() == 2 || field.getDeType() == 3) {
+            if (field.getDeExtractType() == 0 || field.getDeExtractType() == 5) {
+                whereName = String.format(DorisConstants.CAST, originName, DorisConstants.DEFAULT_FLOAT_FORMAT);
+            }
+            if (field.getDeExtractType() == 1) {
+                whereName = String.format(DorisConstants.UNIX_TIMESTAMP, originName) + "*1000";
+            }
+            if (field.getDeExtractType() == 2 || field.getDeExtractType() == 3 || field.getDeExtractType() == 4) {
+                whereName = originName;
+            }
+        } else if (field.getDeType() == 0) {
+            whereName = String.format(DorisConstants.CAST, originName, DorisConstants.VARCHAR);
+        } else {
+            whereName = originName;
+        }
+
+        if (StringUtils.equalsIgnoreCase(item.getFilterType(), "enum")) {
+            if (CollectionUtils.isNotEmpty(item.getEnumValue())) {
+                res = "(" + whereName + " IN ('" + String.join("','", item.getEnumValue()) + "'))";
+            }
+        } else {
+            String value = item.getValue();
+            String whereTerm = transMysqlFilterTerm(item.getTerm());
+            String whereValue = "";
+
+            if (StringUtils.equalsIgnoreCase(item.getTerm(), "null")) {
+                whereValue = "";
+            } else if (StringUtils.equalsIgnoreCase(item.getTerm(), "not_null")) {
+                whereValue = "";
+            } else if (StringUtils.equalsIgnoreCase(item.getTerm(), "empty")) {
+                whereValue = "''";
+            } else if (StringUtils.equalsIgnoreCase(item.getTerm(), "not_empty")) {
+                whereValue = "''";
+            } else if (StringUtils.containsIgnoreCase(item.getTerm(), "in")) {
+                whereValue = "('" + StringUtils.join(value, "','") + "')";
+            } else if (StringUtils.containsIgnoreCase(item.getTerm(), "like")) {
+                whereValue = "'%" + value + "%'";
+            } else {
+                whereValue = String.format(DorisConstants.WHERE_VALUE_VALUE, value);
+            }
+            SQLObj build = SQLObj.builder()
+                    .whereField(whereName)
+                    .whereTermAndValue(whereTerm + whereValue)
+                    .build();
+            res = build.getWhereField() + " " + build.getWhereTermAndValue();
+        }
+        return res;
     }
 
     @Override
@@ -843,48 +1008,65 @@ public class DorisQueryProvider extends QueryProvider {
         List<SQLObj> list = new ArrayList<>();
         for (ChartExtFilterRequest request : requestList) {
             List<String> value = request.getValue();
-            DatasetTableField field = request.getDatasetTableField();
-            if (CollectionUtils.isEmpty(value) || ObjectUtils.isEmpty(field)) {
-                continue;
-            }
-            String whereName = "";
-            String whereTerm = transMysqlFilterTerm(request.getOperator());
-            String whereValue = "";
 
-            String originName;
-            if (ObjectUtils.isNotEmpty(field.getExtField()) && field.getExtField() == 2) {
-                // 解析origin name中有关联的字段生成sql表达式
-                originName = calcFieldRegex(field.getOriginName(), tableObj);
-            } else if (ObjectUtils.isNotEmpty(field.getExtField()) && field.getExtField() == 1) {
-                originName = String.format(DorisConstants.KEYWORD_FIX, tableObj.getTableAlias(), field.getDataeaseName());
+            List<String> whereNameList = new ArrayList<>();
+            List<DatasetTableField> fieldList = new ArrayList<>();
+            if (request.getIsTree()) {
+                fieldList.addAll(request.getDatasetTableFieldList());
             } else {
-                originName = String.format(DorisConstants.KEYWORD_FIX, tableObj.getTableAlias(), field.getDataeaseName());
+                fieldList.add(request.getDatasetTableField());
             }
 
-            if (field.getDeType() == 1) {
-                if (field.getDeExtractType() == 0 || field.getDeExtractType() == 5 || field.getDeExtractType() == 1) {
-                    whereName = String.format(DorisConstants.STR_TO_DATE, originName, DorisConstants.DEFAULT_DATE_FORMAT);
+            for (DatasetTableField field : fieldList) {
+                if (CollectionUtils.isEmpty(value) || ObjectUtils.isEmpty(field)) {
+                    continue;
                 }
-                if (field.getDeExtractType() == 2 || field.getDeExtractType() == 3 || field.getDeExtractType() == 4) {
-                    String cast = String.format(DorisConstants.CAST, originName, DorisConstants.DEFAULT_INT_FORMAT) + "/1000";
-                    whereName = String.format(DorisConstants.FROM_UNIXTIME, cast, DorisConstants.DEFAULT_DATE_FORMAT);
+                String whereName = "";
+
+                String originName;
+                if (ObjectUtils.isNotEmpty(field.getExtField()) && field.getExtField() == 2) {
+                    // 解析origin name中有关联的字段生成sql表达式
+                    originName = calcFieldRegex(field.getOriginName(), tableObj);
+                } else if (ObjectUtils.isNotEmpty(field.getExtField()) && field.getExtField() == 1) {
+                    originName = String.format(DorisConstants.KEYWORD_FIX, tableObj.getTableAlias(), field.getDataeaseName());
+                } else {
+                    originName = String.format(DorisConstants.KEYWORD_FIX, tableObj.getTableAlias(), field.getDataeaseName());
                 }
-            } else if (field.getDeType() == 0) {
-                whereName = String.format(DorisConstants.CAST, originName, DorisConstants.VARCHAR);
-            } else if (field.getDeType() == 2 || field.getDeType() == 3) {
-                if (field.getDeExtractType() == 0 || field.getDeExtractType() == 5) {
-                    whereName = String.format(DorisConstants.CAST, originName, DorisConstants.DEFAULT_FLOAT_FORMAT);
-                }
-                if (field.getDeExtractType() == 1) {
-                    whereName = String.format(DorisConstants.UNIX_TIMESTAMP, originName) + "*1000";
-                }
-                if (field.getDeExtractType() == 2 || field.getDeExtractType() == 3 || field.getDeExtractType() == 4) {
+
+                if (field.getDeType() == 1) {
+                    if (field.getDeExtractType() == 0 || field.getDeExtractType() == 5 || field.getDeExtractType() == 1) {
+                        whereName = String.format(DorisConstants.STR_TO_DATE, originName, DorisConstants.DEFAULT_DATE_FORMAT);
+                    }
+                    if (field.getDeExtractType() == 2 || field.getDeExtractType() == 3 || field.getDeExtractType() == 4) {
+                        String cast = String.format(DorisConstants.CAST, originName, DorisConstants.DEFAULT_INT_FORMAT) + "/1000";
+                        whereName = String.format(DorisConstants.FROM_UNIXTIME, cast, DorisConstants.DEFAULT_DATE_FORMAT);
+                    }
+                } else if (field.getDeType() == 0) {
+                    whereName = String.format(DorisConstants.CAST, originName, DorisConstants.VARCHAR);
+                } else if (field.getDeType() == 2 || field.getDeType() == 3) {
+                    if (field.getDeExtractType() == 0 || field.getDeExtractType() == 5) {
+                        whereName = String.format(DorisConstants.CAST, originName, DorisConstants.DEFAULT_FLOAT_FORMAT);
+                    }
+                    if (field.getDeExtractType() == 1) {
+                        whereName = String.format(DorisConstants.UNIX_TIMESTAMP, originName) + "*1000";
+                    }
+                    if (field.getDeExtractType() == 2 || field.getDeExtractType() == 3 || field.getDeExtractType() == 4) {
+                        whereName = originName;
+                    }
+                } else {
                     whereName = originName;
                 }
-            } else {
-                whereName = originName;
+                whereNameList.add(whereName);
             }
 
+            String whereName = "";
+            if (request.getIsTree()) {
+                whereName = "CONCAT(" + StringUtils.join(whereNameList, ",',',") + ")";
+            } else {
+                whereName = whereNameList.get(0);
+            }
+            String whereTerm = transMysqlFilterTerm(request.getOperator());
+            String whereValue = "";
 
             if (StringUtils.containsIgnoreCase(request.getOperator(), "in")) {
                 whereValue = "('" + StringUtils.join(value, "','") + "')";
@@ -892,7 +1074,7 @@ public class DorisQueryProvider extends QueryProvider {
                 whereValue = "'%" + value.get(0) + "%'";
             } else if (StringUtils.containsIgnoreCase(request.getOperator(), "between")) {
                 if (request.getDatasetTableField().getDeType() == 1) {
-                    SimpleDateFormat simpleDateFormat = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
+                    SimpleDateFormat simpleDateFormat = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS");
                     String startTime = simpleDateFormat.format(new Date(Long.parseLong(value.get(0))));
                     String endTime = simpleDateFormat.format(new Date(Long.parseLong(value.get(1))));
                     whereValue = String.format(DorisConstants.WHERE_BETWEEN, startTime, endTime);
@@ -974,7 +1156,13 @@ public class DorisQueryProvider extends QueryProvider {
             } else if (x.getDeType() == 0) {
                 fieldName = String.format(DorisConstants.CAST, originField, DorisConstants.VARCHAR);
             } else {
-                fieldName = originField;
+                if (x.getDeType() == DeTypeConstants.DE_INT) {
+                    fieldName = String.format(DorisConstants.CAST, originField, DorisConstants.DEFAULT_INT_FORMAT);
+                } else if (x.getDeType() == DeTypeConstants.DE_FLOAT) {
+                    fieldName = String.format(DorisConstants.CAST, originField, DorisConstants.DEFAULT_FLOAT_FORMAT);
+                } else {
+                    fieldName = originField;
+                }
             }
         }
         return SQLObj.builder()
@@ -1026,16 +1214,24 @@ public class DorisQueryProvider extends QueryProvider {
         if (StringUtils.equalsIgnoreCase(y.getDataeaseName(), "*")) {
             fieldName = DorisConstants.AGG_COUNT;
         } else if (SQLConstants.DIMENSION_TYPE.contains(y.getDeType())) {
-            fieldName = String.format(DorisConstants.AGG_FIELD, y.getSummary(), originField);
+            if (StringUtils.equalsIgnoreCase(y.getSummary(), "count_distinct")) {
+                fieldName = String.format(DorisConstants.AGG_FIELD, "COUNT", "DISTINCT " + originField);
+            } else {
+                fieldName = String.format(DorisConstants.AGG_FIELD, y.getSummary(), originField);
+            }
         } else {
             if (StringUtils.equalsIgnoreCase(y.getSummary(), "avg") || StringUtils.containsIgnoreCase(y.getSummary(), "pop")) {
                 String cast = String.format(DorisConstants.CAST, originField, y.getDeType() == 2 ? DorisConstants.DEFAULT_INT_FORMAT : DorisConstants.DEFAULT_FLOAT_FORMAT);
                 String agg = String.format(DorisConstants.AGG_FIELD, y.getSummary(), cast);
                 String cast1 = String.format(DorisConstants.CAST, agg, DorisConstants.DEFAULT_FLOAT_FORMAT);
-                fieldName = String.format(DorisConstants.ROUND, cast1, "2");
+                fieldName = String.format(DorisConstants.ROUND, cast1, "8");
             } else {
                 String cast = String.format(DorisConstants.CAST, originField, y.getDeType() == 2 ? DorisConstants.DEFAULT_INT_FORMAT : DorisConstants.DEFAULT_FLOAT_FORMAT);
-                fieldName = String.format(DorisConstants.AGG_FIELD, y.getSummary(), cast);
+                if (StringUtils.equalsIgnoreCase(y.getSummary(), "count_distinct")) {
+                    fieldName = String.format(DorisConstants.AGG_FIELD, "COUNT", "DISTINCT " + cast);
+                } else {
+                    fieldName = String.format(DorisConstants.AGG_FIELD, y.getSummary(), cast);
+                }
             }
         }
         return SQLObj.builder()
@@ -1081,6 +1277,7 @@ public class DorisQueryProvider extends QueryProvider {
     private String reflectFieldName(DatasetTableField field) {
         return field.getDataeaseName();
     }
+
     private String calcFieldRegex(String originField, SQLObj tableObj) {
         originField = originField.replaceAll("[\\t\\n\\r]]", "");
         // 正则提取[xxx]

@@ -30,7 +30,8 @@ export default {
       copyData: null,
       editFilter: [
         'view',
-        'custom'
+        'custom',
+        'custom-button'
       ]
     }
   },
@@ -56,9 +57,13 @@ export default {
         bus.$emit('component-dialog-edit')
       }
 
+      if (this.curComponent.type === 'custom-button') {
+        bus.$emit('button-dialog-edit')
+      }
+
       // 编辑样式组件
 
-      if (this.curComponent.type === 'v-text' || this.curComponent.type === 'rect-shape') {
+      if (this.curComponent.type === 'v-text' || this.curComponent.type === 'de-rich-text' || this.curComponent.type === 'rect-shape') {
         bus.$emit('component-dialog-style')
       }
     },

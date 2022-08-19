@@ -3,11 +3,15 @@
     <el-tabs v-model="activeName" @tab-click="handleClick">
 
       <el-tab-pane :lazy="true" :label="$t('system_parameter_setting.basic_setting')" name="zero">
-        <basic-setting />
+        <basic-setting v-if="activeName === 'zero'" />
       </el-tab-pane>
 
       <el-tab-pane :lazy="true" :label="$t('system_parameter_setting.mailbox_service_settings')" name="first">
         <email-setting />
+      </el-tab-pane>
+
+      <el-tab-pane :lazy="true" :label="$t('sysParams.map')" name="ten">
+        <map-setting v-if="activeName === 'ten'" ref="mapSetting" />
       </el-tab-pane>
 
       <el-tab-pane v-if="isPluginLoaded" :lazy="true" :label="$t('sysParams.display')" name="second">
@@ -34,8 +38,12 @@
         <cluster-mode />
       </el-tab-pane>
 
-      <el-tab-pane  v-if="engineMode==='cluster'" :lazy="true" :label="$t('system_parameter_setting.kettle_setting')" name="eight">
+      <el-tab-pane v-if="engineMode==='cluster'" :lazy="true" :label="$t('system_parameter_setting.kettle_setting')" name="eight">
         <kettle-setting />
+      </el-tab-pane>
+
+      <el-tab-pane v-if="isPluginLoaded" :lazy="true" :label="$t('sysParams.cas')" name="nine">
+        <plugin-com v-if="isPluginLoaded" ref="CasSetting" component-name="CasSetting" />
       </el-tab-pane>
 
     </el-tabs>
@@ -43,6 +51,7 @@
 </template>
 <script>
 import BasicSetting from './BasicSetting'
+import MapSetting from './MapSetting'
 import EmailSetting from './EmailSetting'
 import SimpleMode from './SimpleModeSetting'
 import ClusterMode from './ClusterModeSetting'
@@ -53,7 +62,7 @@ import { pluginLoaded } from '@/api/user'
 import { engineMode } from '@/api/system/engine'
 export default {
 
-  components: { BasicSetting, EmailSetting, LayoutContent, PluginCom, SimpleMode, ClusterMode, KettleSetting},
+  components: { BasicSetting, EmailSetting, LayoutContent, PluginCom, SimpleMode, ClusterMode, KettleSetting, MapSetting },
   data() {
     return {
       activeName: 'zero',
@@ -69,9 +78,11 @@ export default {
       this.engineMode = res.data
     })
   },
+  created() {
+
+  },
   methods: {
     handleClick(tab, event) {
-      // console.log(tab, event)
     }
   }
 }

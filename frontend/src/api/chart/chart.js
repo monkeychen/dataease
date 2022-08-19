@@ -1,6 +1,4 @@
 import request from '@/utils/request'
-import store from '@/store'
-import { queryPanelComponents } from '@/api/panel/panel'
 
 export function post(url, data, loading = false) {
   return request({
@@ -24,6 +22,14 @@ export function chartCopy(id, panelId) {
   return request({
     url: '/chart/view/chartCopy/' + id + '/' + panelId,
     method: 'post',
+    loading: false
+  })
+}
+export function chartBatchCopy(params, panelId) {
+  return request({
+    url: '/chart/view/chartBatchCopy/' + panelId,
+    method: 'post',
+    data: params,
     loading: false
   })
 }
@@ -86,9 +92,9 @@ export function getChartDetails(id, panelId, data) {
   })
 }
 
-export function save2Cache(panelId, data) {
+export function viewEditSave(panelId, data) {
   return request({
-    url: '/chart/view/save2Cache/' + panelId,
+    url: '/chart/view/viewEditSave/' + panelId,
     method: 'post',
     loading: false,
     data
@@ -115,5 +121,21 @@ export function checkTitle(data) {
     method: 'post',
     data: data,
     loading: false
+  })
+}
+
+export function viewPropsSave(panelId, data) {
+  return request({
+    url: '/chart/view/viewPropsSave/' + panelId,
+    method: 'post',
+    loading: false,
+    data
+  })
+}
+
+export const viewOptions = panelId => {
+  return request({
+    url: '/chart/view/viewOptions/' + panelId,
+    method: 'post'
   })
 }

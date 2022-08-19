@@ -21,7 +21,8 @@ import event from '@/components/canvas/store/event'
 import layer from '@/components/canvas/store/layer'
 import snapshot from '@/components/canvas/store/snapshot'
 import lock from '@/components/canvas/store/lock'
-import { valueValid, formatCondition, formatLinkageCondition } from '@/utils/conditionUtil'
+import task from './modules/task'
+import { valueValid, formatCondition } from '@/utils/conditionUtil'
 import { Condition } from '@/components/widget/bean/Condition'
 
 import {
@@ -29,6 +30,8 @@ import {
 } from '@/views/panel/panel'
 import bus from '@/utils/bus'
 import { BASE_MOBILE_STYLE } from '@/components/canvas/custom-component/component-list'
+import { TYPE_CONFIGS } from '@/views/chart/chart/util'
+import { deepCopy } from '@/components/canvas/utils/utils'
 
 Vue.use(Vuex)
 
@@ -42,6 +45,7 @@ const data = {
     ...layer.state,
     ...snapshot.state,
     ...lock.state,
+    ...task.state,
     // 编辑器模式 edit preview
     editMode: 'edit',
     // 当前页面全局数据 包括扩展公共样式 公共的仪表板样式，用来实时响应样式的变化
@@ -50,6 +54,8 @@ const data = {
     componentDataCache: null,
     // 当前展示画布组件数据
     componentData: [],
+    // 当前展示画布视图信息
+    componentViewsData: {},
     // PC布局画布组件数据
     pcComponentData: [],
     // 移动端布局画布组件数据
@@ -102,10 +108,33 @@ const data = {
       y: 600
     },
     scrollAutoMove: 0,
+    // 系统管理菜单是否收缩
+    isCollapse: false,
     // 视图是否编辑记录
     panelViewEditInfo: {},
     // 仪表板视图明细
-    panelViewDetailsInfo: {}
+    panelViewDetailsInfo: {},
+    // 当前tab页内组件
+    curActiveTabInner: null,
+    // static resource local path
+    staticResourcePath: '/static-resource/',
+    // panel edit batch operation status
+    batchOptStatus: false,
+    // Currently selected components
+    curBatchOptComponents: [],
+    // Currently selected Multiplexing components
+    curMultiplexingComponents: {},
+    mixProperties: [],
+    mixPropertiesInner: {},
+    batchOptChartInfo: null,
+    batchOptViews: {},
+    // properties changed
+    changeProperties: {
+      customStyle: {},
+      customAttr: {}
+    },
+    allViewRender: [],
+    isInEditor: false // 是否在编辑器中，用于判断复制、粘贴组件时是否生效，如果在编辑器外，则无视这些操作
   },
   mutations: {
     ...animation.mutations,
@@ -124,7 +153,9 @@ const data = {
     setEditMode(state, mode) {
       state.editMode = mode
     },
-
+    setIsCollapse(state, isCollapse) {
+      state.isCollapse = isCollapse
+    },
     setCanvasStyle(state, style) {
       if (style) {
         style['selfAdaption'] = true
@@ -139,10 +170,20 @@ const data = {
           dragging: false,
           resizing: false
         }
+        // Is the current component in editing status
+        if (!state.curComponent) {
+          component['editing'] = false
+        } else if (component.id !== state.curComponent.id) {
+          component['editing'] = false
+        }
       }
       state.styleChangeTimes = 0
       state.curComponent = component
       state.curComponentIndex = index
+    },
+
+    setCurActiveTabInner(state, curActiveTabInner) {
+      state.curActiveTabInner = curActiveTabInner
     },
 
     setCurCanvasScale(state, curCanvasScale) {
@@ -174,6 +215,10 @@ const data = {
       Vue.set(state, 'componentData', componentData)
     },
 
+    setComponentViewsData(state, componentViewsData = {}) {
+      Vue.set(state, 'componentViewsData', componentViewsData)
+    },
+
     setPcComponentData(state, pcComponentData = []) {
       Vue.set(state, 'pcComponentData', pcComponentData)
     },
@@ -198,6 +243,7 @@ const data = {
         return newItem
       })
     },
+
     addViewFilter(state, data) {
       const condition = formatCondition(data)
       const vValid = valueValid(condition)
@@ -233,7 +279,6 @@ const data = {
         if (!element.type || element.type !== 'view') continue
         const currentFilters = element.filters || []
         const vidMatch = viewIdMatch(condition.viewIds, element.propValue.viewId)
-
         let j = currentFilters.length
         while (j--) {
           const filter = currentFilters[j]
@@ -265,7 +310,7 @@ const data = {
             const ele = element.options.tabList[idx].content
             if (!ele.type || ele.type !== 'view') continue
 
-            const currentFilters = []
+            const currentFilters = element.linkageFilters || [] // 当前联动filter
 
             data.dimensionList.forEach(dimension => {
               const sourceInfo = viewId + '#' + dimension.id
@@ -298,9 +343,9 @@ const data = {
           state.componentData[index] = element
         }
         if (!element.type || element.type !== 'view') continue
-        // const currentFilters = element.linkageFilters || [] // 当前联动filter
+        const currentFilters = element.linkageFilters || [] // 当前联动filter
         // 联动的视图情况历史条件
-        const currentFilters = []
+        // const currentFilters = []
 
         data.dimensionList.forEach(dimension => {
           const sourceInfo = viewId + '#' + dimension.id
@@ -345,8 +390,13 @@ const data = {
 
           // 外部参数 可能会包含多个参数
           Object.keys(params).forEach(function(sourceInfo) {
-            // 获取外部参数的值 sourceInfo 是外部参数名称
-            const paramValue = params[sourceInfo]
+            // 获取外部参数的值 sourceInfo 是外部参数名称 支持数组传入
+            let paramValue = params[sourceInfo]
+            let operator = 'in'
+            if (paramValue && !Array.isArray(paramValue)) {
+              paramValue = [paramValue]
+              operator = 'eq'
+            }
             // 获取所有目标联动信息
             const targetInfoList = trackInfo[sourceInfo] || []
 
@@ -355,7 +405,7 @@ const data = {
               const targetViewId = targetInfoArray[0] // 目标视图
               if (element.propValue.viewId === targetViewId) { // 如果目标视图 和 当前循环组件id相等 则进行条件增减
                 const targetFieldId = targetInfoArray[1] // 目标视图列ID
-                const condition = new Condition('', targetFieldId, 'eq', [paramValue], [targetViewId])
+                const condition = new Condition('', targetFieldId, operator, paramValue, [targetViewId])
                 let j = currentFilters.length
                 while (j--) {
                   const filter = currentFilters[j]
@@ -430,7 +480,6 @@ const data = {
           item.linkageFilters.splice(0, item.linkageFilters.length)
         }
       })
-      // state.styleChangeTimes++
     },
     setDragComponentInfo(state, dragComponentInfo) {
       dragComponentInfo['shadowStyle'] = {
@@ -493,6 +542,156 @@ const data = {
     },
     resetViewEditInfo(state) {
       state.panelViewEditInfo = {}
+    },
+    removeCurBatchComponentWithId(state, id) {
+      for (let index = 0; index < state.curBatchOptComponents.length; index++) {
+        const element = state.curBatchOptComponents[index]
+        if (element === id) {
+          delete state.batchOptViews[id]
+          state.curBatchOptComponents.splice(index, 1)
+          this.commit('setBatchOptChartInfo')
+          break
+        }
+      }
+    },
+    addCurBatchComponent(state, id) {
+      if (id) {
+        state.curBatchOptComponents.push(id)
+        // get view base info
+        const viewBaseInfo = state.componentViewsData[id]
+        // get properties
+        const viewConfig = state.allViewRender.filter(item => item.render === viewBaseInfo.render && item.value === viewBaseInfo.type)
+        if (viewConfig && viewConfig.length > 0) {
+          state.batchOptViews[id] = viewConfig[0]
+          this.commit('setBatchOptChartInfo')
+        }
+      }
+    },
+    removeCurMultiplexingComponentWithId(state, id) {
+      delete state.curMultiplexingComponents[id]
+    },
+    addCurMultiplexingComponent(state, { component, componentId }) {
+      if (componentId) {
+        state.curMultiplexingComponents[componentId] = component
+      }
+    },
+    setBatchOptChartInfo(state) {
+      let render = null
+      let type = null
+      let allTypes = ''
+      let isPlugin = null
+      state.mixProperties = []
+      state.mixPropertiesInner = {}
+      let mixPropertiesTemp = []
+      let mixPropertyInnerTemp = {}
+      if (state.batchOptViews && JSON.stringify(state.batchOptViews) !== '{}') {
+        for (const key in state.batchOptViews) {
+          if (mixPropertiesTemp.length > 0) {
+            // If it exists , taking the intersection
+            mixPropertiesTemp = mixPropertiesTemp.filter(property => state.batchOptViews[key].properties.indexOf(property) > -1)
+            // 根据当前的mixPropertiesTemp 再对 mixPropertyInnerTemp 进行过滤
+            mixPropertiesTemp.forEach(propertyInnerItem => {
+              if (mixPropertyInnerTemp[propertyInnerItem] && state.batchOptViews[key].propertyInner[propertyInnerItem]) {
+                mixPropertyInnerTemp[propertyInnerItem] = mixPropertyInnerTemp[propertyInnerItem].filter(propertyInnerItemValue => state.batchOptViews[key].propertyInner[propertyInnerItem].indexOf(propertyInnerItemValue) > -1)
+              }
+            })
+          } else {
+            // If it doesn't exist, assignment directly
+            mixPropertiesTemp = deepCopy(state.batchOptViews[key].properties)
+            mixPropertyInnerTemp = deepCopy(state.batchOptViews[key].propertyInner)
+          }
+
+          if (render && render !== state.batchOptViews[key].render) {
+            render = 'mix'
+          } else {
+            render = state.batchOptViews[key].render
+          }
+
+          allTypes = allTypes + '-' + state.batchOptViews[key].value
+          if (type && type !== state.batchOptViews[key].value) {
+            type = 'mix'
+          } else {
+            type = state.batchOptViews[key].value
+          }
+
+          if (isPlugin && isPlugin !== state.batchOptViews[key].isPlugin) {
+            isPlugin = 'mix'
+          } else {
+            isPlugin = state.batchOptViews[key].isPlugin
+          }
+        }
+        mixPropertiesTemp.forEach(property => {
+          if (mixPropertyInnerTemp[property] && mixPropertyInnerTemp[property].length) {
+            state.mixPropertiesInner[property] = mixPropertyInnerTemp[property]
+            state.mixProperties.push(property)
+          }
+        })
+
+        if (type && type === 'mix') {
+          type = type + '-' + allTypes
+        }
+        // Assembly history settings 'customAttr' & 'customStyle'
+        state.batchOptChartInfo = {
+          'mode': 'batchOpt',
+          'render': render,
+          'type': type,
+          'isPlugin': isPlugin,
+          'customAttr': state.changeProperties.customAttr,
+          'customStyle': state.changeProperties.customStyle
+        }
+      } else {
+        state.batchOptChartInfo = null
+      }
+    },
+    setBatchOptStatus(state, status) {
+      state.batchOptStatus = status
+      // Currently selected components
+      state.curBatchOptComponents = []
+      state.mixProperties = []
+      state.mixPropertyInnder = {}
+      state.batchOptChartInfo = null
+      state.batchOptViews = {}
+      state.changeProperties = {
+        customStyle: {},
+        customAttr: {}
+      }
+    },
+    setChangeProperties(state, propertyInfo) {
+      state.changeProperties[propertyInfo.custom][propertyInfo.property] = propertyInfo.value
+    },
+    initCanvasBase(state) {
+      this.commit('setCurComponent', { component: null, index: null })
+      this.commit('clearLinkageSettingInfo', false)
+      this.commit('resetViewEditInfo')
+      this.commit('initCurMultiplexingComponents')
+      state.batchOptStatus = false
+      // Currently selected components
+      state.curBatchOptComponents = []
+      state.curMultiplexingComponents = {}
+      state.mixProperties = []
+      state.mixPropertyInnder = {}
+      state.batchOptChartInfo = null
+      state.batchOptViews = {}
+      state.changeProperties = {
+        customStyle: {},
+        customAttr: {}
+      }
+    },
+    initCanvas(state) {
+      this.commit('initCanvasBase')
+      state.isInEditor = true
+    },
+    initViewRender(state, pluginViews) {
+      pluginViews.forEach(plugin => {
+        plugin.isPlugin = true
+      })
+      state.allViewRender = [...TYPE_CONFIGS, ...pluginViews]
+    },
+    initCurMultiplexingComponents(state) {
+      state.curMultiplexingComponents = {}
+    },
+    setInEditorStatus(state, status) {
+      state.isInEditor = status
     }
   },
   modules: {
@@ -507,7 +706,8 @@ const data = {
     application,
     lic,
     msg,
-    map
+    map,
+    task
   },
   getters
 }

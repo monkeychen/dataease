@@ -1,11 +1,10 @@
 package io.dataease.controller.request.chart;
 
 import io.dataease.dto.PermissionProxy;
+import io.dataease.plugins.common.request.chart.ChartExtFilterRequest;
 import io.swagger.annotations.ApiModelProperty;
 import lombok.Getter;
 import lombok.Setter;
-import springfox.documentation.annotations.ApiIgnore;
-
 import java.util.List;
 
 /**

@@ -3,20 +3,21 @@ package io.dataease.controller.dataset;
 import com.github.xiaoymin.knife4j.annotations.ApiSupport;
 import io.dataease.auth.annotation.DePermission;
 import io.dataease.auth.annotation.DePermissions;
-import io.dataease.base.domain.DatasetGroup;
 import io.dataease.commons.constants.DePermissionType;
 import io.dataease.commons.constants.ResourceAuthLevel;
+import io.dataease.commons.constants.SysLogConstants;
+import io.dataease.commons.utils.DeLogUtils;
 import io.dataease.controller.request.dataset.DataSetGroupRequest;
+import io.dataease.dto.SysLogDTO;
 import io.dataease.dto.dataset.DataSetGroupDTO;
+import io.dataease.plugins.common.base.domain.DatasetGroup;
 import io.dataease.service.dataset.DataSetGroupService;
-import io.dataease.service.dataset.ExtractDataService;
 import io.dataease.service.kettle.KettleService;
 import io.swagger.annotations.Api;
 import io.swagger.annotations.ApiOperation;
 import org.apache.shiro.authz.annotation.Logical;
 import org.springframework.web.bind.annotation.*;
 import springfox.documentation.annotations.ApiIgnore;
-
 import javax.annotation.Resource;
 import java.util.List;
 
@@ -59,8 +60,11 @@ public class DataSetGroupController {
     @DePermission(type = DePermissionType.DATASET, level = ResourceAuthLevel.DATASET_LEVEL_MANAGE)
     @ApiOperation("删除")
     @PostMapping("/delete/{id}")
-    public void tree(@PathVariable String id) throws Exception {
+    public void delete(@PathVariable String id) throws Exception {
+        DatasetGroup datasetGroup = dataSetGroupService.getScene(id);
+        SysLogDTO sysLogDTO = DeLogUtils.buildLog(SysLogConstants.OPERATE_TYPE.DELETE, SysLogConstants.SOURCE_TYPE.DATASET, id, datasetGroup.getPid(), null, null);
         dataSetGroupService.delete(id);
+        DeLogUtils.save(sysLogDTO);
     }
 
     @ApiIgnore

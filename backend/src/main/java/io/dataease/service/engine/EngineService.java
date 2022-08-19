@@ -1,34 +1,35 @@
 package io.dataease.service.engine;
 
-import com.alibaba.fastjson.JSONArray;
-import com.alibaba.fastjson.JSONObject;
 import com.google.gson.Gson;
 import com.google.gson.JsonArray;
-import io.dataease.base.domain.Datasource;
-import io.dataease.base.domain.DeEngine;
-import io.dataease.base.domain.DeEngineExample;
-import io.dataease.base.mapper.DeEngineMapper;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 import io.dataease.commons.utils.BeanUtils;
 import io.dataease.commons.utils.HttpClientConfig;
 import io.dataease.commons.utils.HttpClientUtil;
 import io.dataease.controller.ResultHolder;
-import io.dataease.controller.request.datasource.DatasourceRequest;
-import io.dataease.dto.DatasourceDTO;
 import io.dataease.dto.datasource.DorisConfiguration;
 import io.dataease.dto.datasource.MysqlConfiguration;
 import io.dataease.listener.util.CacheUtils;
+import io.dataease.plugins.common.base.domain.Datasource;
+import io.dataease.plugins.common.base.domain.DeEngine;
+import io.dataease.plugins.common.base.domain.DeEngineExample;
+import io.dataease.plugins.common.base.mapper.DeEngineMapper;
+import io.dataease.plugins.common.request.datasource.DatasourceRequest;
+import io.dataease.plugins.datasource.provider.Provider;
 import io.dataease.provider.ProviderFactory;
-import io.dataease.provider.datasource.DatasourceProvider;
 import io.dataease.service.datasource.DatasourceService;
 import org.apache.commons.collections4.CollectionUtils;
 import org.apache.commons.lang3.StringUtils;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.core.env.Environment;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import javax.annotation.Resource;
-import java.sql.Array;
 import java.util.*;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 @Service
 @Transactional(rollbackFor = Exception.class)
@@ -40,9 +41,9 @@ public class EngineService {
     @Resource
     private DatasourceService datasource;
 
-    static private List<String>simple_engine = Arrays.asList("engine_mysql");
+    static private List<String> simple_engine = Arrays.asList("engine_mysql");
 
-    static private List<String>cluster_engine = Arrays.asList("engine_doris");
+    static private List<String> cluster_engine = Arrays.asList("engine_doris");
 
     public Boolean isLocalMode() {
         return env.getProperty("engine_mode", "local").equalsIgnoreCase("local");
@@ -79,7 +80,7 @@ public class EngineService {
             throw new Exception("未完整设置数据引擎");
         }
         try {
-            DatasourceProvider datasourceProvider = ProviderFactory.getProvider(datasource.getType());
+            Provider datasourceProvider = ProviderFactory.getProvider(datasource.getType());
             DatasourceRequest datasourceRequest = new DatasourceRequest();
             datasourceRequest.setDatasource(datasource);
             datasourceProvider.checkStatus(datasourceRequest);
@@ -96,24 +97,28 @@ public class EngineService {
             String response;
             try {
                 response = HttpClientUtil.get("http://" + dorisConfiguration.getHost() + ":" + dorisConfiguration.getHttpPort() + "/api/backends", httpClientConfig);
-            }catch (Exception e){
+            } catch (Exception e) {
                 return ResultHolder.error("Engine is invalid: " + e.getMessage());
             }
 
-            JSONArray backends =  Optional.ofNullable(JSONObject.parseObject(response).getJSONObject("data")).orElse(new JSONObject()).getJSONArray("backends");
-            if(CollectionUtils.isEmpty(backends)){
+            JsonArray backends = null;
+            JsonObject data = JsonParser.parseString(response).getAsJsonObject().getAsJsonObject("data");
+            if (data != null) {
+                backends = data.getAsJsonArray("backends");
+            }
+            if (backends == null || backends.size() == 0) {
                 return ResultHolder.error("Engine is invalid: no backends found.");
             }
 
             Integer alives = 0;
             for (int i = 0; i < backends.size(); i++) {
-                JSONObject kv = backends.getJSONObject(i);
-                if (kv.getBoolean("is_alive")) {
-                    alives ++;
+                JsonObject kv = backends.get(i).getAsJsonObject();
+                if (kv.get("is_alive").getAsBoolean()) {
+                    alives++;
                 }
             }
 
-            if(alives  < dorisConfiguration.getReplicationNum()){
+            if (alives < dorisConfiguration.getReplicationNum()) {
                 return ResultHolder.error("Engine params is invalid: 副本数量不能大于节点数量.");
             }
         }
@@ -135,51 +140,47 @@ public class EngineService {
         return ResultHolder.success(engine);
     }
 
-    private void checkValid(DeEngine engine)throws Exception{
-        if(isLocalMode()){
+    private void checkValid(DeEngine engine) throws Exception {
+        if (isLocalMode()) {
             throw new Exception("Setting engine is not supported.");
         }
-        if(isSimpleMode()){
-            if(!simple_engine.contains(engine.getType())){
+        if (isSimpleMode()) {
+            if (!simple_engine.contains(engine.getType())) {
                 throw new Exception("Engine type not supported.");
             }
         }
-        if(isClusterMode()){
-            if(!cluster_engine.contains(engine.getType())){
+        if (isClusterMode()) {
+            if (!cluster_engine.contains(engine.getType())) {
                 throw new Exception("Engine type not supported.");
             }
         }
     }
 
     private void setDs(DeEngine engine) {
-        Datasource datasource = new Datasource();
-        BeanUtils.copyBean(datasource, engine);
-        CacheUtils.put("ENGINE", "engine", datasource, null, null);
+        CacheUtils.removeAll("ENGINE");
     }
 
+    @Cacheable(value = "ENGINE")
     public Datasource getDeEngine() throws Exception {
-        Object catcheEngine = CacheUtils.get("ENGINE", "engine");
-        if (catcheEngine != null) {
-            return (Datasource) catcheEngine;
-        }
+        Datasource datasource = new Datasource();
 
         if (isLocalMode()) {
-            JSONObject jsonObject = new JSONObject();
-            jsonObject.put("dataSourceType", "jdbc");
-            jsonObject.put("dataBase", env.getProperty("doris.db", "doris"));
-            jsonObject.put("username", env.getProperty("doris.user", "root"));
-            jsonObject.put("password", env.getProperty("doris.password", "dataease"));
-            jsonObject.put("host", env.getProperty("doris.host", "doris"));
-            jsonObject.put("port", env.getProperty("doris.port", "9030"));
-            jsonObject.put("httpPort", env.getProperty("doris.httpPort", "8030"));
+            Map jsonObjectMap = new HashMap();
+            jsonObjectMap.put("dataSourceType", "jdbc");
+            jsonObjectMap.put("dataBase", env.getProperty("doris.db", "doris"));
+            jsonObjectMap.put("username", env.getProperty("doris.user", "root"));
+            jsonObjectMap.put("password", env.getProperty("doris.password", "dataease"));
+            jsonObjectMap.put("host", env.getProperty("doris.host", "doris"));
+            jsonObjectMap.put("port", env.getProperty("doris.port", "9030"));
+            jsonObjectMap.put("httpPort", env.getProperty("doris.httpPort", "8030"));
 
             DeEngine engine = new DeEngine();
             engine.setId("doris");
             engine.setName("doris");
             engine.setDesc("doris");
             engine.setType("engine_doris");
-            engine.setConfiguration(jsonObject.toJSONString());
-            setDs(engine);
+            engine.setConfiguration(new Gson().toJson(jsonObjectMap));
+            BeanUtils.copyBean(datasource, engine);
         }
         if (isClusterMode()) {
             DeEngineExample engineExample = new DeEngineExample();
@@ -188,7 +189,7 @@ public class EngineService {
             if (CollectionUtils.isEmpty(deEngines)) {
                 throw new Exception("未设置数据引擎");
             }
-            setDs(deEngines.get(0));
+            BeanUtils.copyBean(datasource, deEngines.get(0));
         }
         if (isSimpleMode()) {
             DeEngineExample engineExample = new DeEngineExample();
@@ -197,9 +198,39 @@ public class EngineService {
             if (CollectionUtils.isEmpty(deEngines)) {
                 throw new Exception("未设置数据引擎");
             }
-            setDs(deEngines.get(0));
+            BeanUtils.copyBean(datasource, deEngines.get(0));
         }
-        return getDeEngine();
+        return datasource;
+    }
+
+    public void initSimpleEngine() {
+        if (!isSimpleMode()) {
+            return;
+        }
+        DeEngineExample engineExample = new DeEngineExample();
+        engineExample.createCriteria().andTypeEqualTo("engine_mysql");
+        List<DeEngine> deEngines = deEngineMapper.selectByExampleWithBLOBs(engineExample);
+        if (CollectionUtils.isNotEmpty(deEngines)) {
+            return;
+        }
+        DeEngine engine = new DeEngine();
+        engine.setId(UUID.randomUUID().toString());
+        engine.setType("engine_mysql");
+        MysqlConfiguration mysqlConfiguration = new MysqlConfiguration();
+        Pattern WITH_SQL_FRAGMENT = Pattern.compile("jdbc:mysql://(.*):(\\d+)/(.*)");
+        Matcher matcher = WITH_SQL_FRAGMENT.matcher(env.getProperty("spring.datasource.url"));
+        if (!matcher.find()) {
+            return;
+        }
+        ;
+        mysqlConfiguration.setHost(matcher.group(1));
+        mysqlConfiguration.setPort(Integer.valueOf(matcher.group(2)));
+        mysqlConfiguration.setDataBase(matcher.group(3).split("\\?")[0]);
+        mysqlConfiguration.setExtraParams(matcher.group(3).split("\\?")[1]);
+        mysqlConfiguration.setUsername(env.getProperty("spring.datasource.username"));
+        mysqlConfiguration.setPassword(env.getProperty("spring.datasource.password"));
+        engine.setConfiguration(new Gson().toJson(mysqlConfiguration));
+        deEngineMapper.insert(engine);
     }
 
 

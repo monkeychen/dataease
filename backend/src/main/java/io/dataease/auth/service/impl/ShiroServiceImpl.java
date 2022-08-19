@@ -42,16 +42,19 @@ public class ShiroServiceImpl implements ShiroService {
         filterChainDefinitionMap.put("/index.html", ANON);
         filterChainDefinitionMap.put("/link.html", ANON);
         filterChainDefinitionMap.put("/board/**", ANON);
+        filterChainDefinitionMap.put("/websocket/**", ANON);
+        filterChainDefinitionMap.put("/system/defaultLoginType", ANON);
 
         // 获取主题信息
         filterChainDefinitionMap.put("/plugin/theme/themes", ANON);
         filterChainDefinitionMap.put("/plugin/theme/items/**", ANON);
         filterChainDefinitionMap.put("/plugin/view/types", ANON);
+        filterChainDefinitionMap.put("/static-resource/**", ANON);
 
         // 验证链接
         filterChainDefinitionMap.put("/api/link/validate**", ANON);
         filterChainDefinitionMap.put("/api/map/areaEntitys/**", ANON);
-        filterChainDefinitionMap.put("/dataset/field/fieldValues/**", ANON);
+        filterChainDefinitionMap.put("/api/map/globalEntitys/**", ANON);
         filterChainDefinitionMap.put("/linkJump/queryPanelJumpInfo/**", ANON);
         filterChainDefinitionMap.put("/linkJump/queryTargetPanelJumpInfo", ANON);
 
@@ -72,6 +75,7 @@ public class ShiroServiceImpl implements ShiroService {
 
 
         filterChainDefinitionMap.put("/api/auth/login", ANON);
+        filterChainDefinitionMap.put("/api/auth/logout", ANON);
         filterChainDefinitionMap.put("/api/auth/isPluginLoaded", ANON);
         filterChainDefinitionMap.put("/system/requestTimeOut", ANON);
         filterChainDefinitionMap.put("/api/auth/validateName", ANON);
@@ -82,6 +86,8 @@ public class ShiroServiceImpl implements ShiroService {
         filterChainDefinitionMap.put("/api/pluginCommon/staticInfo/**", ANON);
         filterChainDefinitionMap.put("/plugin/oidc/authInfo", ANON);
         filterChainDefinitionMap.put("/sso/callBack*", ANON);
+        filterChainDefinitionMap.put("/cas/callBack*", ANON);
+        filterChainDefinitionMap.put("/cas/reset/**", ANON);
 
         filterChainDefinitionMap.put("/unauth", ANON);
         filterChainDefinitionMap.put("/display/**", ANON);
@@ -89,11 +95,12 @@ public class ShiroServiceImpl implements ShiroService {
         filterChainDefinitionMap.put("/downline", ANON);
         filterChainDefinitionMap.put("/common-files/**", ANON);
         filterChainDefinitionMap.put("/linkage/getPanelAllLinkageInfo/**", ANON);
-        filterChainDefinitionMap.put("/api/auth/logout", "logout");
 
         filterChainDefinitionMap.put("/api/link/resourceDetail/**", "link");
         filterChainDefinitionMap.put("/api/link/viewDetail/**", "link");
+        filterChainDefinitionMap.put("/panel/group/exportDetails", ANON);
         filterChainDefinitionMap.put("/dataset/field/linkMultFieldValues", "link");
+        filterChainDefinitionMap.put("/dataset/field/linkMappingFieldValues", "link");
 
         filterChainDefinitionMap.put("/**", "authc");
 

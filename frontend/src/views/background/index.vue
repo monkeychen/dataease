@@ -12,7 +12,7 @@
           <span class="params-title">{{ $t('panel.inner_padding') }}</span>
         </el-col>
         <el-col :span="15">
-          <el-slider v-model="curComponent.commonBackground.innerPadding" show-input :show-input-controls="false" input-size="mini" :max="15" />
+          <el-slider v-model="curComponent.commonBackground.innerPadding" show-input :show-input-controls="false" input-size="mini" :max="50" />
         </el-col>
       </el-row>
       <el-row style="height: 50px;overflow: hidden">
@@ -21,6 +21,21 @@
         </el-col>
         <el-col :span="15">
           <el-slider v-model="curComponent.commonBackground.borderRadius" show-input :show-input-controls="false" input-size="mini" />
+        </el-col>
+      </el-row>
+
+      <el-row style="height: 40px;overflow: hidden;">
+        <el-col :span="3" style="padding-left: 10px;padding-top: 5px">
+          <el-checkbox v-model="curComponent.commonBackground.backgroundColorSelect">颜色</el-checkbox>
+        </el-col>
+        <el-col :span="1" style="padding-top: 5px">
+          <el-color-picker v-model="curComponent.commonBackground.color" :disabled="!curComponent.commonBackground.backgroundColorSelect" size="mini" class="color-picker-style" :predefine="predefineColors" />
+        </el-col>
+        <el-col :span="3">
+          <span class="params-title-small">不透明度：</span>
+        </el-col>
+        <el-col :span="11">
+          <el-slider v-model="curComponent.commonBackground.alpha" :disabled="!curComponent.commonBackground.backgroundColorSelect" show-input :show-input-controls="false" input-size="mini" />
         </el-col>
       </el-row>
 
@@ -34,21 +49,7 @@
           </span>
         </el-col>
       </el-row>
-      <el-row v-if="curComponent.commonBackground.enable">
-        <el-row style="height: 40px;overflow: hidden">
-          <el-col :span="3" style="padding-left: 10px;padding-top: 5px">
-            <el-radio v-model="curComponent.commonBackground.backgroundType" label="color" @change="onChangeType">颜色</el-radio>
-          </el-col>
-          <el-col :span="1" style="padding-top: 5px">
-            <el-color-picker v-model="curComponent.commonBackground.color" size="mini" class="color-picker-style" :predefine="predefineColors" />
-          </el-col>
-          <el-col :span="3">
-            <span class="params-title-small">不透明度：</span>
-          </el-col>
-          <el-col :span="11">
-            <el-slider v-model="curComponent.commonBackground.alpha" show-input :show-input-controls="false" input-size="mini" />
-          </el-col>
-        </el-row>
+      <el-row v-if="curComponent.commonBackground.enable" style="padding-left: 20px">
         <el-row style="height: 80px;margin-top:10px;margin-bottom:20px;overflow: hidden">
           <el-col :span="3" style="padding-left: 10px">
             <el-radio v-model="curComponent.commonBackground.backgroundType" label="outerImage" @change="onChangeType">{{ $t('panel.photo') }}</el-radio>
@@ -64,12 +65,11 @@
               :on-remove="handleRemove"
               :http-request="upload"
               :file-list="fileList"
-              :on-change="onChange"
             >
               <i class="el-icon-plus" />
             </el-upload>
-            <el-dialog top="25vh" width="600px" :modal-append-to-body="false" :visible.sync="dialogVisible">
-              <img width="100%" :src="dialogImageUrl" alt="">
+            <el-dialog top="25vh" width="600px" :append-to-body="true" :destroy-on-close="true" :visible.sync="dialogVisible">
+              <img width="100%" :src="dialogImageUrl">
             </el-dialog>
           </el-col>
         </el-row>
@@ -93,6 +93,29 @@
           </el-col>
         </el-row>
       </el-row>
+      <el-row v-if="isFilterComponent" style="height: 40px;overflow: hidden;">
+        <el-col :span="5" style="padding-left: 10px;padding-top: 8px">
+          输入框样式(颜色):
+        </el-col>
+        <el-col :span="2" style="padding-left: 10px;padding-top: 8px">
+          边框
+        </el-col>
+        <el-col :span="3" style="padding-top: 5px">
+          <el-color-picker v-model="curComponent.style.brColor" size="mini" class="color-picker-style" :predefine="predefineColors" />
+        </el-col>
+        <el-col :span="2" style="padding-left: 10px;padding-top: 8px">
+          文字
+        </el-col>
+        <el-col :span="3" style="padding-top: 5px">
+          <el-color-picker v-model="curComponent.style.wordColor" size="mini" class="color-picker-style" :predefine="predefineColors" />
+        </el-col>
+        <el-col :span="2" style="padding-left: 10px;padding-top: 8px">
+          背景
+        </el-col>
+        <el-col :span="3" style="padding-top: 5px">
+          <el-color-picker v-model="curComponent.style.innerBgColor" size="mini" class="color-picker-style" :predefine="predefineColors" />
+        </el-col>
+      </el-row>
 
     </el-row>
     <el-row class="root-class">
@@ -108,9 +131,10 @@
 import { queryBackground } from '@/api/background/background'
 import BackgroundItem from '@/views/background/BackgroundItem'
 import { mapState } from 'vuex'
-import eventBus from '@/components/canvas/utils/eventBus'
 import { deepCopy } from '@/components/canvas/utils/utils'
 import { COLOR_PANEL } from '@/views/chart/chart/chart'
+import { uploadFileResult } from '@/api/staticResource/staticResource'
+import { COMMON_BACKGROUND_NONE } from '@/components/canvas/custom-component/component-list'
 
 export default {
   name: 'Background',
@@ -138,14 +162,17 @@ export default {
     ...mapState([
       'curComponent',
       'componentData'
-    ])
+    ]),
+    isFilterComponent() {
+      return ['de-select', 'de-select-grid', 'de-date',  "de-input-search", "de-number-range", "de-select-tree"].includes(this.curComponent.component)
+    }
   },
   methods: {
     init() {
       if (this.curComponent && this.curComponent.commonBackground && this.curComponent.commonBackground.outerImage && typeof (this.curComponent.commonBackground.outerImage) === 'string') {
         this.fileList.push({ url: this.curComponent.commonBackground.outerImage })
       }
-      this.backgroundOrigin = deepCopy(this.curComponent.commonBackground)
+      this.backgroundOrigin = deepCopy(this.curComponent.commonBackground ? this.curComponent.commonBackground : COMMON_BACKGROUND_NONE)
       this.queryBackground()
     },
     queryBackground() {
@@ -169,17 +196,14 @@ export default {
       this.$emit('backgroundSetClose')
     },
     commitStyle() {
-      const canvasStyleData = deepCopy(this.canvasStyleData)
-      canvasStyleData.panel = this.panel
-      this.$store.commit('setCanvasStyle', canvasStyleData)
-      this.$store.commit('recordSnapshot', 'commitStyle')
+      this.$store.commit('recordSnapshot')
     },
     onChangeType() {
       this.commitStyle()
     },
     handleRemove(file, fileList) {
       this.uploadDisabled = false
-      this.panel.imageUrl = null
+      this.curComponent.commonBackground.outerImage = null
       this.fileList = []
       this.commitStyle()
     },
@@ -187,17 +211,11 @@ export default {
       this.dialogImageUrl = file.url
       this.dialogVisible = true
     },
-    onChange(file, fileList) {
-      var _this = this
-      _this.uploadDisabled = true
-      const reader = new FileReader()
-      reader.onload = function() {
-        _this.curComponent.commonBackground.outerImage = reader.result
-      }
-      reader.readAsDataURL(file.raw)
-    },
     upload(file) {
-      // console.log('this is upload')
+      const _this = this
+      uploadFileResult(file.file, (fileUrl) => {
+        _this.curComponent.commonBackground.outerImage = fileUrl
+      })
     }
 
   }

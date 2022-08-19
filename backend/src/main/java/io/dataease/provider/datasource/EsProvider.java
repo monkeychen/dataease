@@ -1,19 +1,20 @@
 package io.dataease.provider.datasource;
 
-import com.alibaba.fastjson.JSONObject;
 import com.google.gson.Gson;
+import com.google.gson.JsonParser;
 import io.dataease.commons.utils.HttpClientConfig;
 import io.dataease.commons.utils.HttpClientUtil;
 import io.dataease.controller.request.datasource.es.EsReponse;
 import io.dataease.controller.request.datasource.es.Request;
 import io.dataease.controller.request.datasource.es.RequestWithCursor;
-import io.dataease.controller.request.datasource.DatasourceRequest;
 import io.dataease.dto.datasource.EsConfiguration;
-import io.dataease.dto.datasource.TableDesc;
-import io.dataease.dto.datasource.TableField;
 import io.dataease.exception.DataEaseException;
 import io.dataease.i18n.Translator;
-import io.dataease.plugins.common.constants.EsSqlLConstants;
+import io.dataease.plugins.common.constants.datasource.EsSqlLConstants;
+import io.dataease.plugins.common.dto.datasource.TableDesc;
+import io.dataease.plugins.common.dto.datasource.TableField;
+import io.dataease.plugins.common.request.datasource.DatasourceRequest;
+import io.dataease.plugins.datasource.provider.Provider;
 import io.dataease.provider.query.es.EsQueryProvider;
 import org.apache.commons.codec.binary.Base64;
 import org.apache.commons.lang.StringUtils;
@@ -24,8 +25,8 @@ import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.stream.Collectors;
 
-@Service("es")
-public class EsProvider extends DatasourceProvider {
+@Service("esProviders")
+public class EsProvider extends Provider {
 
 
     /**
@@ -206,10 +207,6 @@ public class EsProvider extends DatasourceProvider {
     }
 
     @Override
-    public void handleDatasource(DatasourceRequest datasourceRequest, String type) throws Exception {
-    }
-
-    @Override
     public List<TableDesc> getTables(DatasourceRequest datasourceRequest) throws Exception {
         List<TableDesc> tables = new ArrayList<>();
         try {
@@ -257,13 +254,14 @@ public class EsProvider extends DatasourceProvider {
 
     @Override
     public String checkStatus(DatasourceRequest datasourceRequest) throws Exception {
+        Gson gson = new Gson();
         EsConfiguration esConfiguration = new Gson().fromJson(datasourceRequest.getDatasource().getConfiguration(), EsConfiguration.class);
         String response = exexGetQuery(datasourceRequest);
 
-        if (JSONObject.parseObject(response).getJSONObject("error") != null) {
-            throw new Exception(JSONObject.parseObject(response).getJSONObject("error").getString("reason"));
+        if (JsonParser.parseString(response).getAsJsonObject().getAsJsonObject("error") != null) {
+            throw new Exception(JsonParser.parseString(response).getAsJsonObject().getAsJsonObject("error").get("reason").getAsString());
         }
-        String version = JSONObject.parseObject(response).getJSONObject("version").getString("number");
+        String version = JsonParser.parseString(response).getAsJsonObject().getAsJsonObject("version").get("number").getAsString();
         String[] versionList = version.split("\\.");
         if (Integer.valueOf(versionList[0]) < 7 && Integer.valueOf(versionList[1]) < 3) {
             throw new Exception(Translator.get("i18n_es_limit"));
@@ -293,7 +291,6 @@ public class EsProvider extends DatasourceProvider {
         Request request = new Request();
         request.setQuery(sql);
         request.setFetch_size(datasourceRequest.getFetchSize());
-        System.out.println(new Gson().toJson(request));
         String url = esConfiguration.getUrl().endsWith("/") ? esConfiguration.getUrl() + uri : esConfiguration.getUrl() + "/" + uri;
         String response = HttpClientUtil.post(url, new Gson().toJson(request), httpClientConfig);
         return response;
